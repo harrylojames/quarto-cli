@@ -5,21 +5,23 @@
  */
 
 import { Document, Element } from "../../core/deno-dom.ts";
-import { dirname, isAbsolute, join, relative } from "path/mod.ts";
+import { join } from "path/mod.ts";
 
 import { renderEjs } from "../../core/ejs.ts";
 import { formatResourcePath } from "../../core/resources.ts";
 import { findParent } from "../../core/html.ts";
 
 import {
+  kCodeLinks,
+  kCodeLinksTitle,
   kContentMode,
   kDisableArticleLayout,
-  kDisplayName,
-  kExtensionName,
   kFormatLinks,
   kGrid,
   kHtmlMathMethod,
   kIncludeInHeader,
+  kLaunchBinderTitle,
+  kLaunchDevContainerTitle,
   kLinkCitations,
   kNotebookLinks,
   kOtherLinks,
@@ -27,7 +29,6 @@ import {
   kQuartoTemplateParams,
   kRelatedFormatsTitle,
   kSectionDivs,
-  kTargetFormat,
   kTocDepth,
   kTocExpand,
   kTocLocation,
@@ -35,7 +36,6 @@ import {
 import {
   Format,
   FormatExtras,
-  FormatLink,
   kBodyEnvelope,
   kDependencies,
   kHtmlFinalizers,
@@ -78,20 +78,17 @@ import {
   processDocumentTitle,
 } from "./format-html-title.ts";
 import { kTemplatePartials } from "../../command/render/template.ts";
-import {
-  isDocxOutput,
-  isHtmlOutput,
-  isIpynbOutput,
-  isJatsOutput,
-  isMarkdownOutput,
-  isPdfOutput,
-  isPresentationOutput,
-} from "../../config/format.ts";
-import { basename } from "path/mod.ts";
+import { isHtmlOutput } from "../../config/format.ts";
 import { emplaceNotebookPreviews } from "./format-html-notebook.ts";
 import { ProjectContext } from "../../project/types.ts";
-import { extname } from "path/mod.ts";
 import { AlternateLink, otherFormatLinks } from "./format-html-links.ts";
+import { warning } from "log/mod.ts";
+import {
+  binderUrl,
+  hasBinderCompatibleEnvironment,
+  hasDevContainer,
+} from "../../core/container.ts";
+import { codeSpacesUrl } from "../../core/container.ts";
 
 export function bootstrapFormatDependency() {
   const boostrapResource = (resource: string) =>
@@ -280,10 +277,10 @@ function bootstrapHtmlPostprocessor(
       for (let j = 0; j < images.length; j++) {
         (images[j] as Element).classList.add("figure-img");
       }
-      const captions = figure.querySelectorAll("figcaption");
-      for (let j = 0; j < captions.length; j++) {
-        (captions[j] as Element).classList.add("figure-caption");
-      }
+      // const captions = figure.querySelectorAll("figcaption");
+      // for (let j = 0; j < captions.length; j++) {
+      //   (captions[j] as Element).classList.add("figure-caption");
+      // }
     }
 
     // move the toc if there is a sidebar
@@ -385,9 +382,8 @@ function bootstrapHtmlPostprocessor(
       }
     }
 
-    if (format.metadata[kOtherLinks]) {
-      processOtherLinks(doc, format);
-    }
+    // Process additional links for this document
+    await processOtherLinks(doc, format, project);
 
     // default treatment for computational tables
     const addTableClasses = (table: Element, computational = false) => {
@@ -501,64 +497,197 @@ function createLinkChild(formatLink: AlternateLink, doc: Document) {
   return link;
 }
 
-function processOtherLinks(
+async function processOtherLinks(
   doc: Document,
   format: Format,
+  context?: ProjectContext,
 ) {
-  const otherLinks = format.metadata[kOtherLinks] as FormatLink[];
-  const dlLinkTarget = getLinkTarget(doc, kLinkProvidersOtherLinks);
-  if (otherLinks && otherLinks.length > 0 && dlLinkTarget) {
-    const containerEl = doc.createElement("div");
-    containerEl.classList.add("quarto-other-links");
+  const processLinks = (
+    otherLinks: OtherLink[],
+    clz: string,
+    title: string,
+  ) => {
+    const dlLinkTarget = getLinkTarget(doc, kLinkProvidersOtherLinks);
+    if (otherLinks.length > 0 && dlLinkTarget) {
+      const containerEl = doc.createElement("div");
+      containerEl.classList.add(clz);
 
-    const heading = dlLinkTarget.makeHeadingEl(
-      format.language[kOtherLinksTitle],
-    );
-    containerEl.appendChild(heading);
-
-    const getAttrs = (otherLink: OtherLink) => {
-      if (otherLink.rel || otherLink.target) {
-        const attrs: Record<string, string> = {};
-        if (otherLink.rel) {
-          attrs.rel = otherLink.rel;
-        }
-        if (otherLink.target) {
-          attrs.target = otherLink.target;
-        }
-        return attrs;
-      } else {
-        return undefined;
-      }
-    };
-
-    const linkList = dlLinkTarget.makeContainerEl();
-    let order = 0;
-    for (let i = 0; i < otherLinks.length; i++) {
-      const otherLink = otherLinks[i];
-      const alternateLink: AlternateLink = {
-        icon: otherLink.icon || "link-45deg",
-        href: otherLink.href,
-        title: otherLink.text,
-        order: ++order,
-        attr: getAttrs(otherLink),
-      };
-      const li = dlLinkTarget.makeItemEl(
-        createLinkChild(alternateLink, doc),
-        i,
-        otherLinks.length,
+      const heading = dlLinkTarget.makeHeadingEl(
+        title,
       );
+      containerEl.appendChild(heading);
+
+      const getAttrs = (otherLink: OtherLink) => {
+        if (otherLink.rel || otherLink.target) {
+          const attrs: Record<string, string> = {};
+          if (otherLink.rel) {
+            attrs.rel = otherLink.rel;
+          }
+          if (otherLink.target) {
+            attrs.target = otherLink.target;
+          }
+          return attrs;
+        } else {
+          return undefined;
+        }
+      };
+
+      const linkList = dlLinkTarget.makeContainerEl();
+      let order = 0;
+      for (let i = 0; i < otherLinks.length; i++) {
+        const otherLink = otherLinks[i];
+        const alternateLink: AlternateLink = {
+          icon: otherLink.icon || "link-45deg",
+          href: otherLink.href,
+          title: otherLink.text,
+          order: ++order,
+          attr: getAttrs(otherLink),
+        };
+        const li = dlLinkTarget.makeItemEl(
+          createLinkChild(alternateLink, doc),
+          i,
+          otherLinks.length,
+        );
+        if (linkList) {
+          linkList.appendChild(li);
+        } else {
+          containerEl.appendChild(li);
+        }
+      }
       if (linkList) {
-        linkList.appendChild(li);
+        containerEl.appendChild(linkList);
+      }
+
+      dlLinkTarget.targetEl.appendChild(containerEl);
+    }
+  };
+
+  const resolveCodeLinks = async (
+    metadata: Metadata,
+    context?: ProjectContext,
+  ): Promise<OtherLink[]> => {
+    const codeLinks = metadata[kCodeLinks] as
+      | boolean
+      | string
+      | string[]
+      | OtherLink[];
+    if (codeLinks !== undefined) {
+      if (typeof (codeLinks) === "boolean") {
+        return [];
+      } else if (typeof (codeLinks) === "string") {
+        if (!context) {
+          throw new Error(
+            `The code-link value '${codeLinks}' is only supported from within a project.`,
+          );
+        }
+        const resolvedCodeLink = await resolveCodeLink(codeLinks, context);
+        if (resolvedCodeLink) {
+          return [resolvedCodeLink];
+        } else {
+          throw new Error(`Unknown code-link value '${codeLinks}'`);
+        }
       } else {
-        containerEl.appendChild(li);
+        const outputLinks: OtherLink[] = [];
+        for (const codeLink of codeLinks) {
+          if (typeof (codeLink) === "string") {
+            if (!context) {
+              throw new Error(
+                `The code-link value '${codeLink}' is only supported from within a project.`,
+              );
+            }
+            const resolvedCodeLink = await resolveCodeLink(codeLink, context);
+            if (resolvedCodeLink) {
+              outputLinks.push(resolvedCodeLink);
+            } else {
+              throw new Error(`Unknown code-link value '${codeLink}'`);
+            }
+          } else {
+            outputLinks.push(codeLink);
+          }
+        }
+        return outputLinks;
       }
     }
-    if (linkList) {
-      containerEl.appendChild(linkList);
-    }
+    return [];
+  };
 
-    dlLinkTarget.targetEl.appendChild(containerEl);
-  }
+  const resolveCodeLink = async (
+    link: string,
+    context: ProjectContext,
+  ): Promise<OtherLink | undefined> => {
+    if (link === "repo") {
+      const env = await context.environment(context);
+      if (env.github.repoUrl) {
+        return {
+          icon: "github",
+          text: "GitHub Repo",
+          href: env.github.repoUrl,
+          target: "_blank",
+        };
+      } else {
+        warning(
+          "The 'repo' code link is not able to be created as the project isn't a GitHub project.",
+        );
+      }
+    } else if (link === "devcontainer") {
+      const env = await context.environment(context);
+      if (
+        env.github.organization && env.github.repository && env.github.repoUrl
+      ) {
+        const containerUrl = codeSpacesUrl(env.github.repoUrl);
+        return {
+          icon: "github",
+          text: format.language[kLaunchDevContainerTitle] ||
+            "Launch Dev Container",
+          href: containerUrl,
+          target: "_blank",
+        };
+      } else {
+        warning(
+          "The 'devcontainer' code link is not able to be created as the project isn't a GitHub project.",
+        );
+      }
+    } else if (link === "binder") {
+      const env = await context.environment(context);
+      if (env.github.organization && env.github.repository) {
+        const containerUrl = binderUrl(
+          env.github.organization,
+          env.github.repository,
+          {
+            // TODO: figure out open file path (if support in vscode/rstudio)
+            // openFile: extname(source) === ".ipynb" ? source : undefined
+            editor: env.codeEnvironment,
+          },
+        );
+        return {
+          icon: "journals",
+          text: format.language[kLaunchBinderTitle] ||
+            "Launch Binder",
+          href: containerUrl,
+          target: "_blank",
+        };
+      } else {
+        warning(
+          "The 'binder' code link is not able to be created as the project isn't a GitHub project.",
+        );
+      }
+    }
+  };
+
+  const codeLinks = await resolveCodeLinks(format.metadata, context);
+
+  const otherLinkOptions = [{
+    links: (format.metadata[kOtherLinks] || []) as OtherLink[],
+    clz: "quarto-other-links",
+    title: format.language[kOtherLinksTitle] || "Other Links",
+  }, {
+    links: codeLinks,
+    clz: "quarto-code-links",
+    title: format.language[kCodeLinksTitle] || "Code Links",
+  }];
+  otherLinkOptions.forEach((linkDesc) => {
+    processLinks(linkDesc.links, linkDesc.clz, linkDesc.title);
+  });
 }
 
 type selector = string;

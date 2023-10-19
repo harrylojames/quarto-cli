@@ -15,6 +15,7 @@ import { mergeArrayCustomizer } from "../core/config.ts";
 import { Schema } from "../core/lib/yaml-schema/types.ts";
 
 import {
+  kCodeLinks,
   kExecuteDefaults,
   kExecuteDefaultsKeys,
   kExecuteEnabled,
@@ -33,11 +34,13 @@ import {
   kMetadataFile,
   kMetadataFiles,
   kMetadataFormat,
+  kOtherLinks,
   kPandocDefaults,
   kPandocDefaultsKeys,
   kPandocMetadata,
   kRenderDefaults,
   kRenderDefaultsKeys,
+  kServer,
   kTblColwidths,
   kVariant,
 } from "./constants.ts";
@@ -208,6 +211,13 @@ export function metadataAsFormat(metadata: Metadata): Format {
     }
   });
 
+  // normalize server type
+  if (typeof (format.metadata[kServer]) === "string") {
+    format.metadata[kServer] = {
+      type: format.metadata[kServer],
+    };
+  }
+
   // coalese ipynb-filter to ipynb-filters
   const filter = format.execute[kIpynbFilter];
   if (typeof (filter) === "string") {
@@ -261,12 +271,17 @@ export function mergeFormatMetadata<T>(
   // that should not be combined with other types)
   const kUnmergeableKeys = [kTblColwidths];
 
+  // These boolean keys will disable array values
+  const kBooleanDisableArrays = [kCodeLinks, kOtherLinks];
+
   return mergeConfigsCustomized<T>(
     (objValue: unknown, srcValue: unknown, key: string) => {
       if (kUnmergeableKeys.includes(key)) {
         return srcValue;
       } else if (key === kVariant) {
         return mergePandocVariant(objValue, srcValue);
+      } else if (kBooleanDisableArrays.includes(key)) {
+        return mergeDisablableArray(objValue, srcValue);
       } else {
         return undefined;
       }
@@ -324,6 +339,24 @@ export function mergeConfigsCustomized<T>(
       }
     },
   );
+}
+
+export function mergeDisablableArray(objValue: unknown, srcValue: unknown) {
+  if (Array.isArray(objValue) && Array.isArray(srcValue)) {
+    return mergeArrayCustomizer(objValue, srcValue);
+  } else {
+    if (srcValue === false) {
+      return [];
+    } else {
+      const srcArr = srcValue !== undefined
+        ? Array.isArray(srcValue) ? srcValue : [srcValue]
+        : [];
+      const objArr = objValue !== undefined
+        ? Array.isArray(objValue) ? objValue : [objValue]
+        : [];
+      return mergeArrayCustomizer(objArr, srcArr);
+    }
+  }
 }
 
 export function mergePandocVariant(objValue: unknown, srcValue: unknown) {

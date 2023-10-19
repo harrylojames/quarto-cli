@@ -27,29 +27,19 @@ export async function configure(
 ) {
   // Download dependencies
   for (const dependency of kDependencies) {
-    try {
-      const targetDir = join(
-        config.directoryInfo.bin,
-        "tools",
-      );
-      await configureDependency(dependency, targetDir, config);
-    } catch (e) {
-      if (
-        e.message ===
-          "The architecture aarch64 is missing the dependency deno_dom"
-      ) {
-        info("\nIgnoring deno_dom dependency on Apple Silicon");
-        continue;
-      } else {
-        throw e;
-      }
-    }
+    const targetDir = join(
+      config.directoryInfo.bin,
+      "tools",
+    );
+    await configureDependency(dependency, targetDir, config);
   }
 
+  info("Building quarto-preview.js...");
   const result = buildQuartoPreviewJs(config.directoryInfo.src);
   if (!result.success) {
     throw new Error();
   }
+  info("Build completed.");
 
   // Move the quarto script into place
   info("Placing Quarto script");
@@ -163,11 +153,13 @@ export function copyPandocScript(config: Configuration, targetDir: string) {
     Deno.removeSync(pandocFile);
   }
 
-  info("> creating pandoc symlink");
-  Deno.run({
-    cwd: targetDir,
-    cmd: ["ln", "-s", linkTarget, "pandoc"]
-  });
+  if (Deno.build.os !== "windows") {
+    info("> creating pandoc symlink");
+    Deno.run({
+      cwd: targetDir,
+      cmd: ["ln", "-s", linkTarget, "pandoc"]
+    });  
+  }
 }
 
 export function copyPandocAliasScript(config: Configuration, toolsDir: string) {

@@ -25,6 +25,7 @@ import {
   kCodeLineNumbers,
   kCodeLines,
   kCodeLink,
+  kCodeLinksTitle,
   kCodeOverflow,
   kCodeSummary,
   kCodeTools,
@@ -71,6 +72,7 @@ import {
   kExecuteIpynb,
   kExtensionName,
   kFigAlign,
+  kFigAsp,
   kFigDpi,
   kFigEnv,
   kFigFormat,
@@ -85,6 +87,7 @@ import {
   kGladtex,
   kHighlightStyle,
   kHtmlMathMethod,
+  kHtmlTableProcessing,
   kInclude,
   kIncludeAfterBody,
   kIncludeBeforeBody,
@@ -92,6 +95,7 @@ import {
   kInlineIncludes,
   kIpynbFilters,
   kIpynbProduceSourceNotebook,
+  kIpynbShellInteractivity,
   kKatex,
   kKeepHidden,
   kKeepIpynb,
@@ -110,6 +114,8 @@ import {
   kLatexOutputDir,
   kLatexTinyTex,
   kLatexTlmgrOpts,
+  kLaunchBinderTitle,
+  kLaunchDevContainerTitle,
   kLinkExternalFilter,
   kLinkExternalIcon,
   kLinkExternalNewwindow,
@@ -123,6 +129,7 @@ import {
   kListingPageFieldReadingTime,
   kListingPageFieldSubtitle,
   kListingPageFieldTitle,
+  kListingPageFieldWordCount,
   kListingPageMinutesCompact,
   kListingPageNoMatches,
   kListingPageOrderBy,
@@ -131,6 +138,7 @@ import {
   kListingPageOrderByDefault,
   kListingPageOrderByNumberAsc,
   kListingPageOrderByNumberDesc,
+  kListingPageWords,
   kListings,
   kManuscriptMecaBundle,
   kMarkdownHeadings,
@@ -306,10 +314,21 @@ export type PandocFilter = {
   path: string;
 };
 
-export type QuartoFilter = string | PandocFilter;
+export type QuartoFilterEntryPoint = PandocFilter & { "at": string };
+
+export type QuartoFilter = string | PandocFilter | QuartoFilterEntryPoint;
 
 export function isPandocFilter(filter: QuartoFilter): filter is PandocFilter {
   return (<PandocFilter> filter).path !== undefined;
+}
+
+export function isFilterEntryPoint(
+  filter: QuartoFilter,
+): filter is QuartoFilterEntryPoint {
+  if (typeof filter === "string") {
+    return false;
+  }
+  return (<QuartoFilterEntryPoint> filter).at !== undefined;
 }
 
 export interface NotebookPreviewDescriptor {
@@ -453,6 +472,7 @@ export interface FormatRender {
   [kNotebookPreserveCells]?: boolean;
   [kClearCellOptions]?: boolean;
   [kIpynbProduceSourceNotebook]?: boolean;
+  [kHtmlTableProcessing]?: "none";
 }
 
 export interface FormatExecute {
@@ -461,6 +481,7 @@ export interface FormatExecute {
   [kFigHeight]?: number;
   [kFigFormat]?: "retina" | "png" | "jpeg" | "svg" | "pdf";
   [kFigDpi]?: number;
+  [kFigAsp]?: number;
   [kMermaidFormat]?: "png" | "svg" | "js";
   [kDfPrint]?: "default" | "kable" | "tibble" | "paged";
   [kCache]?: true | false | "refresh" | null;
@@ -480,6 +501,13 @@ export interface FormatExecute {
   [kKeepMd]?: boolean;
   [kKeepIpynb]?: boolean;
   [kIpynbFilters]?: string[];
+  [kIpynbShellInteractivity]?:
+    | null
+    | "all"
+    | "last"
+    | "last_expr"
+    | "none"
+    | "last_expr_or_assign";
 }
 
 export interface FormatPandoc {
@@ -569,6 +597,9 @@ export interface FormatLanguage {
   [kTocTitleWebsite]?: string;
   [kRelatedFormatsTitle]?: string;
   [kOtherLinksTitle]?: string;
+  [kCodeLinksTitle]?: string;
+  [kLaunchDevContainerTitle]?: string;
+  [kLaunchBinderTitle]?: string;
   [kSourceNotebookPrefix]?: string;
   [kRelatedNotebooksTitle]?: string;
   [kCalloutTipCaption]?: string;
@@ -652,8 +683,10 @@ export interface FormatLanguage {
   [kListingPageFieldFileModified]?: string;
   [kListingPageFieldSubtitle]?: string;
   [kListingPageFieldReadingTime]?: string;
+  [kListingPageFieldWordCount]?: string;
   [kListingPageFieldCategories]?: string;
   [kListingPageMinutesCompact]?: string;
+  [kListingPageWords]?: string;
   [kListingPageCategoryAll]?: string;
   [kListingPageNoMatches]?: string;
   [kNotebookPreviewDownload]?: string;

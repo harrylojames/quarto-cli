@@ -10,6 +10,8 @@ fig_width = {0}
 fig_height = {1}
 fig_format = '{2}'
 fig_dpi = {3}
+interactivity = '{5}'
+is_shiny = {6}
 
 # matplotlib defaults / format
 try:
@@ -37,7 +39,10 @@ try:
 except Exception:
   pass
 
-
+# interactivity
+if interactivity:
+  from IPython.core.interactiveshell import InteractiveShell
+  InteractiveShell.ast_node_interactivity = interactivity
 
 # output kernel dependencies
 kernel_deps = dict()
@@ -65,6 +70,49 @@ if r'{4}':
 # reset state
 %reset
 
+# shiny
+# Checking for shiny by using {6} directly because we're after the %reset. We don't want
+# to set a variable that stays in global scope.
+if {6}:
+  try:
+    import htmltools as _htmltools
+    import ast as _ast
+
+    _htmltools.html_dependency_render_mode = "json"
+
+    # This decorator will be added to all function definitions
+    def _display_if_has_repr_html(x):
+      try:
+        # IPython 7.14 preferred import
+        from IPython.display import display, HTML
+      except:
+        from IPython.core.display import display, HTML
+
+      if hasattr(x, '_repr_html_'):
+        display(HTML(x._repr_html_()))
+      return x
+
+    class _FunctionDefReprHtml(_ast.NodeTransformer):
+      def visit_FunctionDef(self, node):
+        node.decorator_list.insert(
+          0,
+          _ast.Name(id="_display_if_has_repr_html", ctx=_ast.Load())
+        )
+        return node
+
+      def visit_AsyncFunctionDef(self, node):
+        node.decorator_list.insert(
+          0,
+          _ast.Name(id="_display_if_has_repr_html", ctx=_ast.Load())
+        )
+        return node
+
+    ip = get_ipython()
+    ip.ast_transformers.append(_FunctionDefReprHtml())
+
+  except:
+    pass
+
 def ojs_define(**kwargs):
   import json
   try:
@@ -87,7 +135,7 @@ def ojs_define(**kwargs):
       return dict((k,v) for (k,v) in zip(j["index"], j["data"]))
     else:
       return v
-  
+
   v = dict(contents=list(dict(name=key, value=convert(value)) for (key, value) in kwargs.items()))
   display(HTML('<script type="ojs-define">' + json.dumps(v) + '</script>'), metadata=dict(ojs_define = True))
 globals()["ojs_define"] = ojs_define

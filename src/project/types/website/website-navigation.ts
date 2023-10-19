@@ -126,7 +126,7 @@ import { navigationMarkdownHandlers } from "./website-navigation-md.ts";
 import {
   createMarkdownPipeline,
   MarkdownPipeline,
-} from "./website-pipeline-md.ts";
+} from "../../../core/markdown-pipeline.ts";
 import { TempContext } from "../../../core/temp.ts";
 import { HtmlPostProcessResult } from "../../../command/render/types.ts";
 import { isJupyterNotebook } from "../../../core/jupyter/jupyter.ts";
@@ -585,6 +585,13 @@ function handleRepoLinks(
   language: FormatLanguage,
   config?: ProjectConfig,
 ) {
+  // Don't process repo-actions if document disables it
+  if (format.metadata[kSiteRepoActions] === false) {
+    return;
+  }
+
+  const forceRepoActions = format.metadata[kSiteRepoActions] === true;
+
   const repoActions = websiteConfigActions(
     kSiteRepoActions,
     kWebsite,
@@ -594,8 +601,6 @@ function handleRepoLinks(
   if (issueUrl && !repoActions.includes("issue")) {
     repoActions.push("issue");
   }
-
-  const forceRepoActions = format.metadata[kSiteRepoActions] === true;
 
   const elRepoSource = doc.querySelector(
     "[" + kDataQuartoSourceUrl + '="repo"]',
@@ -1035,7 +1040,7 @@ function validateTool(tool: SidebarTool) {
   }
 }
 
-function sidebarForHref(href: string, format: Format) {
+export function sidebarForHref(href: string, format: Format) {
   // if there is a single sidebar then it applies to all hrefs
   if (navigation.sidebars.length === 1) {
     return navigation.sidebars[0];
@@ -1165,7 +1170,7 @@ function nextAndPrevious(
   }
 }
 
-function breadCrumbs(href: string, sidebar?: Sidebar) {
+export function breadCrumbs(href: string, sidebar?: Sidebar) {
   if (sidebar?.contents) {
     const crumbs: SidebarItem[] = [];
 
@@ -1399,7 +1404,9 @@ function uniqueMenuId(navItem: NavigationItemObject) {
   return `nav-menu-${id}${number ? ("-" + number) : ""}`;
 }
 
-async function resolveItem<T extends { href?: string; text?: string }>(
+async function resolveItem<
+  T extends { href?: string; text?: string; icon?: string },
+>(
   project: ProjectContext,
   href: string,
   item: T,
@@ -1433,6 +1440,9 @@ async function resolveItem<T extends { href?: string; text?: string }>(
       };
     }
   } else {
+    if (!item.text && !item.icon) {
+      item.text = item.href;
+    }
     return item;
   }
 }

@@ -7212,7 +7212,7 @@ var require_yaml_intelligence_resources = __commonJS({
           },
           description: {
             short: "Include cell source code in rendered output.",
-            long: "Include cell source code in rendered output.\n\n- `true` (default): include source code in output\n- `false`: do not include source code in output\n- `fenced`: in addition to echoing, include the cell delimiter as part of the output.\n- `[...]`: A list of positive or negative line numbers to selectively include or exclude lines\n  (explicit inclusion/excusion of lines is available only when using the knitr engine)\n"
+            long: "Include cell source code in rendered output.\n\n- `true` (default in most formats): include source code in output\n- `false` (default in presentation formats like `beamer`, `revealjs`, and `pptx`): do not include source code in output\n- `fenced`: in addition to echoing, include the cell delimiter as part of the output.\n- `[...]`: A list of positive or negative line numbers to selectively include or exclude lines\n  (explicit inclusion/excusion of lines is available only when using the knitr engine)\n"
           }
         },
         {
@@ -7320,7 +7320,17 @@ var require_yaml_intelligence_resources = __commonJS({
           tags: {
             engine: "knitr"
           },
-          schema: "boolean",
+          schema: {
+            anyOf: [
+              "boolean",
+              {
+                enum: [
+                  "styler",
+                  "formatR"
+                ]
+              }
+            ]
+          },
           default: false,
           description: "Whether to reformat R code."
         },
@@ -7954,6 +7964,15 @@ var require_yaml_intelligence_resources = __commonJS({
             short: "Apply explicit table column widths",
             long: "Apply explicit table column widths for markdown grid tables and pipe\ntables that are more than `columns` characters wide (72 by default). \n\nSome formats (e.g. HTML) do an excellent job automatically sizing\ntable columns and so don't benefit much from column width specifications.\nOther formats (e.g. LaTeX) require table column sizes in order to \ncorrectly flow longer cell content (this is a major reason why tables \n> 72 columns wide are assigned explicit widths by Pandoc).\n\nThis can be specified as:\n\n- `auto`: Apply markdown table column widths except when there is a\n  hyperlink in the table (which tends to throw off automatic\n  calculation of column widths based on the markdown text width of cells).\n  (`auto` is the default for HTML output formats)\n\n- `true`: Always apply markdown table widths (`true` is the default\n  for all non-HTML formats)\n\n- `false`: Never apply markdown table widths.\n\n- An array of numbers (e.g. `[40, 30, 30]`): Array of explicit width percentages.\n"
           }
+        },
+        {
+          name: "html-table-processing",
+          schema: {
+            enum: [
+              "none"
+            ]
+          },
+          description: "If `none`, do not process raw HTML table in cell output and leave it as-is"
         }
       ],
       "schema/cell-textoutput.yml": [
@@ -8048,7 +8067,7 @@ var require_yaml_intelligence_resources = __commonJS({
           },
           description: {
             short: "Location of output relative to the code that generated it (`default`, `fragment`, `slide`, `column`, or `column-location`)",
-            long: "Location of output relative to the code that generated it. The possible values are as follows:\n\n- `default`: Normal flow of the slide after the code\n- `fragment`: In a fragment (not visible until you advance)\n- `slide`: On a new slide after the curent one\n- 'column': In an adjacent column \n- `column-fragment`:   In an adjacent column (not visible until you advance)\n\nNote that this option is supported only for the `revealjs` format.\n"
+            long: "Location of output relative to the code that generated it. The possible values are as follows:\n\n- `default`: Normal flow of the slide after the code\n- `fragment`: In a fragment (not visible until you advance)\n- `slide`: On a new slide after the curent one\n- `column`: In an adjacent column \n- `column-fragment`:   In an adjacent column (not visible until you advance)\n\nNote that this option is supported only for the `revealjs` format.\n"
           }
         },
         {
@@ -8233,9 +8252,36 @@ var require_yaml_intelligence_resources = __commonJS({
             anyOf: [
               "path",
               {
-                record: {
-                  type: "string",
-                  path: "path"
+                object: {
+                  properties: {
+                    type: "string",
+                    path: "path"
+                  },
+                  required: [
+                    "path"
+                  ]
+                }
+              },
+              {
+                object: {
+                  properties: {
+                    type: "string",
+                    path: "path",
+                    at: {
+                      enum: [
+                        "pre-ast",
+                        "post-ast",
+                        "pre-quarto",
+                        "post-quarto",
+                        "pre-render",
+                        "post-render"
+                      ]
+                    }
+                  },
+                  required: [
+                    "path",
+                    "at"
+                  ]
                 }
               },
               {
@@ -9278,6 +9324,21 @@ var require_yaml_intelligence_resources = __commonJS({
                             }
                           }
                         },
+                        "show-item-context": {
+                          schema: {
+                            anyOf: [
+                              {
+                                enum: [
+                                  "tree",
+                                  "parent",
+                                  "root"
+                                ]
+                              },
+                              "boolean"
+                            ]
+                          },
+                          description: "Whether to include search result parents when displaying items in search results (when possible)."
+                        },
                         algolia: {
                           object: {
                             properties: {
@@ -9655,6 +9716,22 @@ var require_yaml_intelligence_resources = __commonJS({
                   ]
                 },
                 description: "A list of other links to appear below the TOC."
+              },
+              "code-links": {
+                schema: {
+                  anyOf: [
+                    "boolean",
+                    {
+                      ref: "code-links-schema"
+                    }
+                  ]
+                },
+                tags: {
+                  formats: [
+                    "$html-doc"
+                  ]
+                },
+                description: "A list of codes links to appear with this document."
               }
             }
           }
@@ -10188,8 +10265,13 @@ var require_yaml_intelligence_resources = __commonJS({
                         categories: {
                           maybeArrayOf: {
                             string: {
-                              description: "A list of categories for which to create separate RSS feeds containing only posts with that category."
+                              description: "A list of categories for which to create separate RSS feeds containing only posts with that category"
                             }
+                          }
+                        },
+                        "xml-stylesheet": {
+                          path: {
+                            description: "The path to an XML stylesheet (XSL file) used to style the RSS feed."
                           }
                         }
                       }
@@ -10625,6 +10707,13 @@ var require_yaml_intelligence_resources = __commonJS({
               host: {
                 ref: "csl-person",
                 description: "Host of the item (e.g. of a TV show or podcast)."
+              },
+              id: {
+                anyOf: [
+                  "string",
+                  "number"
+                ],
+                description: "A value which uniquely identifies this item."
               },
               illustrator: {
                 ref: "csl-person",
@@ -11251,6 +11340,58 @@ var require_yaml_intelligence_resources = __commonJS({
           }
         },
         {
+          id: "code-links-schema",
+          schema: {
+            anyOf: [
+              "boolean",
+              {
+                maybeArrayOf: {
+                  anyOf: [
+                    {
+                      object: {
+                        properties: {
+                          icon: {
+                            string: {
+                              description: "The bootstrap icon for this code link."
+                            }
+                          },
+                          text: {
+                            string: {
+                              description: "The text for this code link."
+                            }
+                          },
+                          href: {
+                            string: {
+                              description: "The href for this code link."
+                            }
+                          },
+                          rel: {
+                            string: {
+                              description: "The rel used in the `a` tag for this code link."
+                            }
+                          },
+                          target: {
+                            string: {
+                              description: "The target used in the `a` tag for this code link."
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      enum: [
+                        "repo",
+                        "binder",
+                        "devcontainer"
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
           id: "manuscript-schema",
           schema: {
             object: {
@@ -11260,6 +11401,12 @@ var require_yaml_intelligence_resources = __commonJS({
                   path: {
                     description: "The input document that will serve as the root document for this manuscript"
                   }
+                },
+                "code-links": {
+                  schema: {
+                    ref: "code-links-schema"
+                  },
+                  description: "Code links to display for this manuscript."
                 },
                 "manuscript-url": {
                   string: {
@@ -11345,7 +11492,8 @@ var require_yaml_intelligence_resources = __commonJS({
               "$html-all",
               "context",
               "muse",
-              "odt"
+              "odt",
+              "docx"
             ]
           },
           description: "Identifies the subtitle of the document."
@@ -11470,7 +11618,8 @@ var require_yaml_intelligence_resources = __commonJS({
               "$jats-all",
               "context",
               "ms",
-              "odt"
+              "odt",
+              "docx"
             ]
           },
           description: "Summary of document"
@@ -11481,7 +11630,8 @@ var require_yaml_intelligence_resources = __commonJS({
           tags: {
             formats: [
               "$html-doc",
-              "$epub-all"
+              "$epub-all",
+              "docx"
             ]
           },
           description: "Title used to label document abstract"
@@ -11955,6 +12105,47 @@ var require_yaml_intelligence_resources = __commonJS({
                 object: {
                   closed: true,
                   properties: {
+                    custom: {
+                      arrayOf: {
+                        object: {
+                          description: "A custom cross reference type.",
+                          closed: true,
+                          properties: {
+                            kind: {
+                              enum: [
+                                "float"
+                              ],
+                              description: 'The kind of cross reference (currently only "float" is supported).'
+                            },
+                            prefix: {
+                              string: {
+                                description: "The prefix used in rendered citations when referencing this type."
+                              }
+                            },
+                            name: {
+                              string: {
+                                description: "The prefix used in captions when referencing this type."
+                              }
+                            },
+                            "ref-type": {
+                              string: {
+                                description: 'The prefix string used in references ("dia-", etc.) when referencing this type.'
+                              }
+                            },
+                            "latex-env": {
+                              string: {
+                                description: "The name of the custom LaTeX environment that quarto will use to create this type of crossreferenceable object in LaTeX output."
+                              }
+                            },
+                            "latex-list-of-name": {
+                              string: {
+                                description: 'The name of the custom LaTeX "list of" command that quarto will use to create this type of crossreferenceable object in LaTeX output.'
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
                     chapters: {
                       boolean: {
                         description: "Use top level sections (H1) in this document as chapters.",
@@ -13328,11 +13519,6 @@ var require_yaml_intelligence_resources = __commonJS({
                   object: {
                     closed: true,
                     properties: {
-                      id: {
-                        string: {
-                          description: "Unique identifier assigned to an award, contract, or grant."
-                        }
-                      },
                       statement: {
                         string: {
                           description: "Displayable prose statement that describes the funding for the research on which a work was based."
@@ -13343,125 +13529,148 @@ var require_yaml_intelligence_resources = __commonJS({
                           description: "Open access provisions that apply to a work or the funding information that provided the open access provisions."
                         }
                       },
-                      source: {
+                      awards: {
                         maybeArrayOf: {
-                          anyOf: [
-                            "string",
-                            {
-                              object: {
-                                closed: true,
-                                properties: {
-                                  text: {
-                                    string: {
-                                      description: "The text describing the source of the funding."
-                                    }
-                                  },
-                                  country: {
-                                    string: {
-                                      description: {
-                                        short: "Abbreviation for country where source of grant is located.",
-                                        long: "Abbreviation for country where source of grant is located.\nWhenever possible, ISO 3166-1 2-letter alphabetic codes should be used.\n"
+                          object: {
+                            properties: {
+                              id: {
+                                string: {
+                                  description: "Unique identifier assigned to an award, contract, or grant."
+                                }
+                              },
+                              name: {
+                                string: {
+                                  description: "The name of this award"
+                                }
+                              },
+                              description: {
+                                string: {
+                                  description: "The description for this award."
+                                }
+                              },
+                              source: {
+                                maybeArrayOf: {
+                                  anyOf: [
+                                    "string",
+                                    {
+                                      object: {
+                                        closed: true,
+                                        properties: {
+                                          text: {
+                                            string: {
+                                              description: "The text describing the source of the funding."
+                                            }
+                                          },
+                                          country: {
+                                            string: {
+                                              description: {
+                                                short: "Abbreviation for country where source of grant is located.",
+                                                long: "Abbreviation for country where source of grant is located.\nWhenever possible, ISO 3166-1 2-letter alphabetic codes should be used.\n"
+                                              }
+                                            }
+                                          }
+                                        }
                                       }
                                     }
-                                  }
-                                }
+                                  ]
+                                },
+                                description: "Agency or organization that funded the research on which a work was based."
+                              },
+                              recipient: {
+                                maybeArrayOf: {
+                                  anyOf: [
+                                    "string",
+                                    {
+                                      object: {
+                                        closed: true,
+                                        properties: {
+                                          ref: {
+                                            string: {
+                                              description: "The id of an author or affiliation in the document metadata."
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      object: {
+                                        closed: true,
+                                        properties: {
+                                          name: {
+                                            string: {
+                                              description: "The name of an individual that was the recipient of the funding."
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      object: {
+                                        closed: true,
+                                        properties: {
+                                          institution: {
+                                            anyOf: [
+                                              "string",
+                                              "object"
+                                            ],
+                                            description: "The institution that was the recipient of the funding."
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                description: "Individual(s) or institution(s) to whom the award was given (for example, the principal grant holder or the sponsored individual)."
+                              },
+                              investigator: {
+                                maybeArrayOf: {
+                                  anyOf: [
+                                    "string",
+                                    {
+                                      object: {
+                                        closed: true,
+                                        properties: {
+                                          ref: {
+                                            string: {
+                                              description: "The id of an author or affiliation in the document metadata."
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      object: {
+                                        closed: true,
+                                        properties: {
+                                          name: {
+                                            string: {
+                                              description: "The name of an individual that was responsible for the intellectual content of the work reported in the document."
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      object: {
+                                        closed: true,
+                                        properties: {
+                                          institution: {
+                                            anyOf: [
+                                              "string",
+                                              "object"
+                                            ],
+                                            description: "The institution that was responsible for the intellectual content of the work reported in the document."
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                description: "Individual(s) responsible for the intellectual content of the work reported in the document."
                               }
                             }
-                          ]
-                        },
-                        description: "Agency or organization that funded the research on which a work was based."
-                      },
-                      recipient: {
-                        maybeArrayOf: {
-                          anyOf: [
-                            "string",
-                            {
-                              object: {
-                                closed: true,
-                                properties: {
-                                  ref: {
-                                    string: {
-                                      description: "The id of an author or affiliation in the document metadata."
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            {
-                              object: {
-                                closed: true,
-                                properties: {
-                                  name: {
-                                    string: {
-                                      description: "The name of an individual that was the recipient of the funding."
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            {
-                              object: {
-                                closed: true,
-                                properties: {
-                                  institution: {
-                                    anyOf: [
-                                      "string",
-                                      "object"
-                                    ],
-                                    description: "The institution that was the recipient of the funding."
-                                  }
-                                }
-                              }
-                            }
-                          ]
-                        },
-                        description: "Individual(s) or institution(s) to whom the award was given (for example, the principal grant holder or the sponsored individual)."
-                      },
-                      investigator: {
-                        maybeArrayOf: {
-                          anyOf: [
-                            "string",
-                            {
-                              object: {
-                                closed: true,
-                                properties: {
-                                  ref: {
-                                    string: {
-                                      description: "The id of an author or affiliation in the document metadata."
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            {
-                              object: {
-                                closed: true,
-                                properties: {
-                                  name: {
-                                    string: {
-                                      description: "The name of an individual that was responsible for the intellectual content of the work reported in the document."
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            {
-                              object: {
-                                closed: true,
-                                properties: {
-                                  institution: {
-                                    anyOf: [
-                                      "string",
-                                      "object"
-                                    ],
-                                    description: "The institution that was responsible for the intellectual content of the work reported in the document."
-                                  }
-                                }
-                              }
-                            }
-                          ]
-                        },
-                        description: "Individual(s) responsible for the intellectual content of the work reported in the document."
+                          }
+                        }
                       }
                     }
                   }
@@ -14436,7 +14645,7 @@ var require_yaml_intelligence_resources = __commonJS({
       ],
       "schema/document-library.yml": [
         {
-          name: "reveal-js-url",
+          name: "revealjs-url",
           schema: "path",
           tags: {
             formats: [
@@ -14588,9 +14797,39 @@ var require_yaml_intelligence_resources = __commonJS({
             ]
           },
           schema: {
-            ref: "other-links"
+            anyOf: [
+              {
+                enum: [
+                  false
+                ]
+              },
+              {
+                ref: "other-links"
+              }
+            ]
           },
           description: "A list of links that should be displayed below the table of contents in an `Other Links` section."
+        },
+        {
+          name: "code-links",
+          tags: {
+            formats: [
+              "$html-doc"
+            ]
+          },
+          schema: {
+            anyOf: [
+              {
+                enum: [
+                  false
+                ]
+              },
+              {
+                ref: "code-links-schema"
+              }
+            ]
+          },
+          description: "A list of links that should be displayed below the table of contents in an `Code Links` section."
         },
         {
           name: "notebook-subarticles",
@@ -14729,7 +14968,9 @@ var require_yaml_intelligence_resources = __commonJS({
               "$asciidoc-all",
               "$html-files",
               "$pdf-all",
-              "context"
+              "context",
+              "odt",
+              "$office-all"
             ]
           },
           description: "List of keywords to be included in the document metadata."
@@ -14740,7 +14981,8 @@ var require_yaml_intelligence_resources = __commonJS({
           tags: {
             formats: [
               "$pdf-all",
-              "$office-all"
+              "$office-all",
+              "odt"
             ]
           },
           description: "The document subject"
@@ -14750,6 +14992,7 @@ var require_yaml_intelligence_resources = __commonJS({
           schema: "string",
           tags: {
             formats: [
+              "odt",
               "$office-all"
             ]
           },
@@ -14847,7 +15090,7 @@ var require_yaml_intelligence_resources = __commonJS({
           },
           description: {
             short: "The License for this document, if any. (e.g. `CC BY`)",
-            long: "The license for this document, if any. \n\nCreative Commons licenses `CC BY`, `CC BY-SA`, `CC BY-ND`, `CC BY-NC` will automatically generate a license link\nin the document appendix. Other license text will be placed in the appendix verbatim.\n"
+            long: "The license for this document, if any. \n\nCreative Commons licenses `CC BY`, `CC BY-SA`, `CC BY-ND`, `CC BY-NC`, `CC BY-NC-SA`, and `CC BY-NC-ND` will automatically generate a license link\nin the document appendix. Other license text will be placed in the appendix verbatim.\n"
           }
         },
         {
@@ -15882,6 +16125,26 @@ var require_yaml_intelligence_resources = __commonJS({
           description: "Filters to pre-process ipynb files before rendering to markdown"
         },
         {
+          name: "ipynb-shell-interactivity",
+          schema: {
+            enum: [
+              null,
+              "all",
+              "last",
+              "last_expr",
+              "none",
+              "last_expr_or_assign"
+            ]
+          },
+          tags: {
+            contexts: [
+              "document-execute"
+            ],
+            engine: "jupyter"
+          },
+          description: "Specify which nodes should be run interactively (displaying output from expressions)\n"
+        },
+        {
           name: "keep-typ",
           tags: {
             formats: [
@@ -15946,6 +16209,15 @@ var require_yaml_intelligence_resources = __commonJS({
             short: "Specify the default dpi (dots per inch) value for conversion from pixels to inch/\ncentimeters and vice versa.\n",
             long: "Specify the default dpi (dots per inch) value for conversion from pixels to inch/\ncentimeters and vice versa. (Technically, the correct term would be ppi: pixels per\ninch.) The default is `96`. When images contain information about dpi internally, the\nencoded value is used instead of the default specified by this option.\n"
           }
+        },
+        {
+          name: "html-table-processing",
+          schema: {
+            enum: [
+              "none"
+            ]
+          },
+          description: "If `none`, do not process tables in HTML input."
         }
       ],
       "schema/document-reveal-content.yml": [
@@ -16018,7 +16290,7 @@ var require_yaml_intelligence_resources = __commonJS({
           },
           description: {
             short: "Location of output relative to the code that generated it (`default`, `fragment`, `slide`, `column`, or `column-location`)",
-            long: "Location of output relative to the code that generated it. The possible values are as follows:\n\n- `default`: Normal flow of the slide after the code\n- `fragment`: In a fragment (not visible until you advance)\n- `slide`: On a new slide after the curent one\n- 'column': In an adjacent column \n- `column-fragment`:   In an adjacent column (not visible until you advance)\n\nNote that this option is supported only for the `revealjs` format.\n"
+            long: "Location of output relative to the code that generated it. The possible values are as follows:\n\n- `default`: Normal flow of the slide after the code\n- `fragment`: In a fragment (not visible until you advance)\n- `slide`: On a new slide after the curent one\n- `column`: In an adjacent column \n- `column-fragment`:   In an adjacent column (not visible until you advance)\n\nNote that this option is supported only for the `revealjs` format.\n"
           }
         }
       ],
@@ -17470,6 +17742,34 @@ var require_yaml_intelligence_resources = __commonJS({
           description: "Setting this to false prevents this document from being included in searches."
         },
         {
+          name: "repo-actions",
+          schema: {
+            anyOf: [
+              "boolean",
+              {
+                maybeArrayOf: {
+                  enum: [
+                    "none",
+                    "edit",
+                    "source",
+                    "issue"
+                  ],
+                  description: {
+                    short: "Links to source repository actions",
+                    long: "Links to source repository actions (`none` or one or more of `edit`, `source`, `issue`)"
+                  }
+                }
+              }
+            ]
+          },
+          tags: {
+            formats: [
+              "$html-doc"
+            ]
+          },
+          description: "Setting this to false prevents the `repo-actions` from appearing on this page."
+        },
+        {
           name: "aliases",
           schema: {
             arrayOf: "string"
@@ -18832,6 +19132,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Provide button for copying search link",
         "One or more keys that will act as a shortcut to launch search (single\ncharacters)",
         "One or more keys that will act as a shortcut to launch search (single\ncharacters)",
+        "Whether to include search result parents when displaying items in\nsearch results (when possible).",
         "Use external Algolia search index",
         "The name of the index to use when performing a search",
         "The unique ID used by Algolia to identify your application",
@@ -18899,6 +19200,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Publish open graph metadata",
         "Publish twitter card metadata",
         "A list of other links to appear below the TOC.",
+        "A list of codes links to appear with this document.",
         "Book title",
         "Description metadata for HTML version of book",
         "The path to the favicon for this website",
@@ -18961,6 +19263,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Provide button for copying search link",
         "One or more keys that will act as a shortcut to launch search (single\ncharacters)",
         "One or more keys that will act as a shortcut to launch search (single\ncharacters)",
+        "Whether to include search result parents when displaying items in\nsearch results (when possible).",
         "Use external Algolia search index",
         "The name of the index to use when performing a search",
         "The unique ID used by Algolia to identify your application",
@@ -19028,6 +19331,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Publish open graph metadata",
         "Publish twitter card metadata",
         "A list of other links to appear below the TOC.",
+        "A list of codes links to appear with this document.",
         "Book subtitle",
         "Author or authors of the book",
         "Author or authors of the book",
@@ -19134,8 +19438,9 @@ var require_yaml_intelligence_resources = __commonJS({
           short: "The language of the feed.",
           long: 'The language of the feed. Omitted if not specified. See <a href="https://www.rssboard.org/rss-language-codes">https://www.rssboard.org/rss-language-codes</a>\nfor a list of valid language codes.'
         },
-        "A list of categories for which to create separate RSS feeds\ncontaining only posts with that category.",
-        "A list of categories for which to create separate RSS feeds\ncontaining only posts with that category.",
+        "A list of categories for which to create separate RSS feeds\ncontaining only posts with that category",
+        "A list of categories for which to create separate RSS feeds\ncontaining only posts with that category",
+        "The path to an XML stylesheet (XSL file) used to style the RSS\nfeed.",
         {
           short: "The date format to use when displaying dates (e.g.&nbsp;d-M-yyy).",
           long: 'The date format to use when displaying dates (e.g.&nbsp;d-M-yyy). Learn\nmore about supported date formatting values <a href="https://deno.land/std@0.125.0/datetime">here</a>.'
@@ -19266,6 +19571,7 @@ var require_yaml_intelligence_resources = __commonJS({
         },
         "Guest (e.g.&nbsp;on a TV show or podcast).",
         "Host of the item (e.g.&nbsp;of a TV show or podcast).",
+        "A value which uniquely identifies this item.",
         "Illustrator (e.g.&nbsp;of a children\u2019s book or graphic novel).",
         "Interviewer (e.g.&nbsp;of an interview).",
         "International Standard Book Number (e.g.&nbsp;\u201C978-3-8474-1017-1\u201D).",
@@ -19412,6 +19718,7 @@ var require_yaml_intelligence_resources = __commonJS({
         },
         "Guest (e.g.&nbsp;on a TV show or podcast).",
         "Host of the item (e.g.&nbsp;of a TV show or podcast).",
+        "A value which uniquely identifies this item.",
         "Illustrator (e.g.&nbsp;of a children\u2019s book or graphic novel).",
         "Interviewer (e.g.&nbsp;of an interview).",
         "International Standard Book Number (e.g.&nbsp;\u201C978-3-8474-1017-1\u201D).",
@@ -19566,6 +19873,7 @@ var require_yaml_intelligence_resources = __commonJS({
         },
         "Guest (e.g.&nbsp;on a TV show or podcast).",
         "Host of the item (e.g.&nbsp;of a TV show or podcast).",
+        "A value which uniquely identifies this item.",
         "Illustrator (e.g.&nbsp;of a children\u2019s book or graphic novel).",
         "Interviewer (e.g.&nbsp;of an interview).",
         "International Standard Book Number (e.g.&nbsp;\u201C978-3-8474-1017-1\u201D).",
@@ -19687,7 +19995,18 @@ var require_yaml_intelligence_resources = __commonJS({
         "The title of the notebook when viewed.",
         "The url to use when viewing this notebook.",
         "The url to use when downloading the notebook from the preview",
+        "The bootstrap icon for this code link.",
+        "The text for this code link.",
+        "The href for this code link.",
+        "The rel used in the <code>a</code> tag for this code link.",
+        "The target used in the <code>a</code> tag for this code link.",
+        "The bootstrap icon for this code link.",
+        "The text for this code link.",
+        "The href for this code link.",
+        "The rel used in the <code>a</code> tag for this code link.",
+        "The target used in the <code>a</code> tag for this code link.",
         "The input document that will serve as the root document for this\nmanuscript",
+        "Code links to display for this manuscript.",
         "The deployed url for this manuscript",
         "Whether to generate a MECA bundle for this manuscript",
         "Additional file resources to be copied to output directory",
@@ -19970,6 +20289,13 @@ var require_yaml_intelligence_resources = __commonJS({
         },
         "Configuration for document commenting.",
         "Configuration for crossref labels and prefixes.",
+        "A custom cross reference type.",
+        "The kind of cross reference (currently only \u201Cfloat\u201D is\nsupported).",
+        "The prefix used in rendered citations when referencing this type.",
+        "The prefix used in captions when referencing this type.",
+        "The prefix string used in references (\u201Cdia-\u201D, etc.) when referencing\nthis type.",
+        "The name of the custom LaTeX environment that quarto will use to\ncreate this type of crossreferenceable object in LaTeX output.",
+        "The name of the custom LaTeX \u201Clist of\u201D command that quarto will use\nto create this type of crossreferenceable object in LaTeX output.",
         "Use top level sections (H1) in this document as chapters.",
         "The delimiter used between the prefix and the caption.",
         "The title prefix used for figure captions.",
@@ -20208,9 +20534,11 @@ var require_yaml_intelligence_resources = __commonJS({
           long: "Specify the heading level at which to split the EPUB into separate\nchapter files. The default is to split into chapters at level-1\nheadings. This option only affects the internal composition of the EPUB,\nnot the way chapters and sections are displayed to users. Some readers\nmay be slow if the chapter files are too large, so for large documents\nwith few level-1 headings, one might want to use a chapter level of 2 or\n3."
         },
         "Information about the funding of the research reported in the article\n(for example, grants, contracts, sponsors) and any open access fees for\nthe article itself",
-        "Unique identifier assigned to an award, contract, or grant.",
         "Displayable prose statement that describes the funding for the\nresearch on which a work was based.",
         "Open access provisions that apply to a work or the funding\ninformation that provided the open access provisions.",
+        "Unique identifier assigned to an award, contract, or grant.",
+        "The name of this award",
+        "The description for this award.",
         "Agency or organization that funded the research on which a work was\nbased.",
         "The text describing the source of the funding.",
         {
@@ -20237,8 +20565,66 @@ var require_yaml_intelligence_resources = __commonJS({
         "The name of an individual that was responsible for the intellectual\ncontent of the work reported in the document.",
         "The institution that was responsible for the intellectual content of\nthe work reported in the document.",
         "Unique identifier assigned to an award, contract, or grant.",
+        "The name of this award",
+        "The description for this award.",
+        "Agency or organization that funded the research on which a work was\nbased.",
+        "The text describing the source of the funding.",
+        {
+          short: "Abbreviation for country where source of grant is located.",
+          long: "Abbreviation for country where source of grant is located. Whenever\npossible, ISO 3166-1 2-letter alphabetic codes should be used."
+        },
+        "The text describing the source of the funding.",
+        {
+          short: "Abbreviation for country where source of grant is located.",
+          long: "Abbreviation for country where source of grant is located. Whenever\npossible, ISO 3166-1 2-letter alphabetic codes should be used."
+        },
+        "Individual(s) or institution(s) to whom the award was given (for\nexample, the principal grant holder or the sponsored individual).",
+        "The id of an author or affiliation in the document metadata.",
+        "The name of an individual that was the recipient of the funding.",
+        "The institution that was the recipient of the funding.",
+        "The id of an author or affiliation in the document metadata.",
+        "The name of an individual that was the recipient of the funding.",
+        "The institution that was the recipient of the funding.",
+        "Individual(s) responsible for the intellectual content of the work\nreported in the document.",
+        "The id of an author or affiliation in the document metadata.",
+        "The name of an individual that was responsible for the intellectual\ncontent of the work reported in the document.",
+        "The institution that was responsible for the intellectual content of\nthe work reported in the document.",
+        "The id of an author or affiliation in the document metadata.",
+        "The name of an individual that was responsible for the intellectual\ncontent of the work reported in the document.",
+        "The institution that was responsible for the intellectual content of\nthe work reported in the document.",
         "Displayable prose statement that describes the funding for the\nresearch on which a work was based.",
         "Open access provisions that apply to a work or the funding\ninformation that provided the open access provisions.",
+        "Unique identifier assigned to an award, contract, or grant.",
+        "The name of this award",
+        "The description for this award.",
+        "Agency or organization that funded the research on which a work was\nbased.",
+        "The text describing the source of the funding.",
+        {
+          short: "Abbreviation for country where source of grant is located.",
+          long: "Abbreviation for country where source of grant is located. Whenever\npossible, ISO 3166-1 2-letter alphabetic codes should be used."
+        },
+        "The text describing the source of the funding.",
+        {
+          short: "Abbreviation for country where source of grant is located.",
+          long: "Abbreviation for country where source of grant is located. Whenever\npossible, ISO 3166-1 2-letter alphabetic codes should be used."
+        },
+        "Individual(s) or institution(s) to whom the award was given (for\nexample, the principal grant holder or the sponsored individual).",
+        "The id of an author or affiliation in the document metadata.",
+        "The name of an individual that was the recipient of the funding.",
+        "The institution that was the recipient of the funding.",
+        "The id of an author or affiliation in the document metadata.",
+        "The name of an individual that was the recipient of the funding.",
+        "The institution that was the recipient of the funding.",
+        "Individual(s) responsible for the intellectual content of the work\nreported in the document.",
+        "The id of an author or affiliation in the document metadata.",
+        "The name of an individual that was responsible for the intellectual\ncontent of the work reported in the document.",
+        "The institution that was responsible for the intellectual content of\nthe work reported in the document.",
+        "The id of an author or affiliation in the document metadata.",
+        "The name of an individual that was responsible for the intellectual\ncontent of the work reported in the document.",
+        "The institution that was responsible for the intellectual content of\nthe work reported in the document.",
+        "Unique identifier assigned to an award, contract, or grant.",
+        "The name of this award",
+        "The description for this award.",
         "Agency or organization that funded the research on which a work was\nbased.",
         "The text describing the source of the funding.",
         {
@@ -20455,6 +20841,7 @@ var require_yaml_intelligence_resources = __commonJS({
           long: "Controls the display of links to notebooks that provided embedded\ncontent or are created from documents.\nSpecify <code>false</code> to disable linking to source Notebooks.\nSpecify <code>inline</code> to show links to source notebooks beneath\nthe content they provide. Specify <code>global</code> to show a set of\nglobal links to source notebooks."
         },
         "A list of links that should be displayed below the table of contents\nin an <code>Other Links</code> section.",
+        "A list of links that should be displayed below the table of contents\nin an <code>Code Links</code> section.",
         {
           short: "Controls whether referenced notebooks are embedded in JATS output as\nsubarticles.",
           long: "Controls the display of links to notebooks that provided embedded\ncontent or are created from documents.\nDefaults to <code>true</code> - specify <code>false</code> to disable\nembedding Notebook as subarticles with the JATS output."
@@ -20478,7 +20865,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "The text to display for the license.",
         {
           short: "The License for this document, if any. (e.g.&nbsp;<code>CC BY</code>)",
-          long: "The license for this document, if any.\nCreative Commons licenses <code>CC BY</code>, <code>CC BY-SA</code>,\n<code>CC BY-ND</code>, <code>CC BY-NC</code> will automatically generate\na license link in the document appendix. Other license text will be\nplaced in the appendix verbatim."
+          long: "The license for this document, if any.\nCreative Commons licenses <code>CC BY</code>, <code>CC BY-SA</code>,\n<code>CC BY-ND</code>, <code>CC BY-NC</code>, <code>CC BY-NC-SA</code>,\nand <code>CC BY-NC-ND</code> will automatically generate a license link\nin the document appendix. Other license text will be placed in the\nappendix verbatim."
         },
         "The type of the license.",
         "A URL to the license.",
@@ -20650,6 +21037,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Keep the markdown file generated by executing code",
         "Keep the notebook file generated from executing code.",
         "Filters to pre-process ipynb files before rendering to markdown",
+        "Specify which nodes should be run interactively (displaying output\nfrom expressions)",
         "Keep the intermediate typst file used during render.",
         "Keep the intermediate tex file used during render.",
         {
@@ -20669,6 +21057,7 @@ var require_yaml_intelligence_resources = __commonJS({
           short: "Specify the default dpi (dots per inch) value for conversion from\npixels to inch/ centimeters and vice versa.",
           long: "Specify the default dpi (dots per inch) value for conversion from\npixels to inch/ centimeters and vice versa. (Technically, the correct\nterm would be ppi: pixels per inch.) The default is <code>96</code>.\nWhen images contain information about dpi internally, the encoded value\nis used instead of the default specified by this option."
         },
+        "If <code>none</code>, do not process tables in HTML input.",
         "Logo image (placed in bottom right corner of slides)",
         {
           short: "Footer to include on all slides",
@@ -20883,6 +21272,15 @@ var require_yaml_intelligence_resources = __commonJS({
         "Print a list of figures in the document.",
         "Print a list of tables in the document.",
         "Setting this to false prevents this document from being included in\nsearches.",
+        "Setting this to false prevents the <code>repo-actions</code> from\nappearing on this page.",
+        {
+          short: "Links to source repository actions",
+          long: "Links to source repository actions (<code>none</code> or one or more\nof <code>edit</code>, <code>source</code>, <code>issue</code>)"
+        },
+        {
+          short: "Links to source repository actions",
+          long: "Links to source repository actions (<code>none</code> or one or more\nof <code>edit</code>, <code>source</code>, <code>issue</code>)"
+        },
         "URLs that alias this document, when included in a website.",
         {
           short: "The path to a preview image for this document.",
@@ -20970,6 +21368,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Provide button for copying search link",
         "One or more keys that will act as a shortcut to launch search (single\ncharacters)",
         "One or more keys that will act as a shortcut to launch search (single\ncharacters)",
+        "Whether to include search result parents when displaying items in\nsearch results (when possible).",
         "Use external Algolia search index",
         "The name of the index to use when performing a search",
         "The unique ID used by Algolia to identify your application",
@@ -21037,6 +21436,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Publish open graph metadata",
         "Publish twitter card metadata",
         "A list of other links to appear below the TOC.",
+        "A list of codes links to appear with this document.",
         "Book subtitle",
         "Author or authors of the book",
         "Author or authors of the book",
@@ -21120,6 +21520,7 @@ var require_yaml_intelligence_resources = __commonJS({
         },
         "Guest (e.g.&nbsp;on a TV show or podcast).",
         "Host of the item (e.g.&nbsp;of a TV show or podcast).",
+        "A value which uniquely identifies this item.",
         "Illustrator (e.g.&nbsp;of a children\u2019s book or graphic novel).",
         "Interviewer (e.g.&nbsp;of an interview).",
         "International Standard Book Number (e.g.&nbsp;\u201C978-3-8474-1017-1\u201D).",
@@ -21203,6 +21604,15 @@ var require_yaml_intelligence_resources = __commonJS({
         "Disambiguating year suffix in author-date styles (e.g.&nbsp;\u201Ca\u201D in \u201CDoe,\n1999a\u201D).",
         "Manuscript configuration",
         "internal-schema-hack",
+        "Enable or disable lightbox treatment for images in this document.",
+        {
+          short: "Set this to <code>auto</code> if you\u2019d like any image to be given\nlightbox treatment.",
+          long: "Set this to <code>auto</code> if you\u2019d like any image to be given\nlightbox treatment. If you omit this, only images with the class\n<code>lightbox</code> will be given the lightbox treatment."
+        },
+        "The effect that should be used when opening and closing the lightbox.\nOne of <code>fade</code>, <code>zoom</code>, <code>none</code>. Defaults\nto <code>zoom</code>.",
+        "The position of the title and description when displaying a lightbox.\nOne of <code>top</code>, <code>bottom</code>, <code>left</code>,\n<code>right</code>. Defaults to <code>bottom</code>.",
+        "Whether galleries should \u2018loop\u2019 to first image in the gallery if the\nuser continues past the last image of the gallery. Boolean that defaults\nto <code>true</code>.",
+        "A class name to apply to the lightbox to allow css targeting. This\nwill replace the lightbox class with your custom class name.",
         "Project configuration.",
         "Project type (<code>default</code>, <code>website</code>,\n<code>book</code>, or <code>manuscript</code>)",
         "Files to render (defaults to all files)",
@@ -21282,6 +21692,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Provide button for copying search link",
         "One or more keys that will act as a shortcut to launch search (single\ncharacters)",
         "One or more keys that will act as a shortcut to launch search (single\ncharacters)",
+        "Whether to include search result parents when displaying items in\nsearch results (when possible).",
         "Use external Algolia search index",
         "The name of the index to use when performing a search",
         "The unique ID used by Algolia to identify your application",
@@ -21349,6 +21760,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Publish open graph metadata",
         "Publish twitter card metadata",
         "A list of other links to appear below the TOC.",
+        "A list of codes links to appear with this document.",
         "Book subtitle",
         "Author or authors of the book",
         "Author or authors of the book",
@@ -21432,6 +21844,7 @@ var require_yaml_intelligence_resources = __commonJS({
         },
         "Guest (e.g.&nbsp;on a TV show or podcast).",
         "Host of the item (e.g.&nbsp;of a TV show or podcast).",
+        "A value which uniquely identifies this item.",
         "Illustrator (e.g.&nbsp;of a children\u2019s book or graphic novel).",
         "Interviewer (e.g.&nbsp;of an interview).",
         "International Standard Book Number (e.g.&nbsp;\u201C978-3-8474-1017-1\u201D).",
@@ -21514,7 +21927,8 @@ var require_yaml_intelligence_resources = __commonJS({
         },
         "Disambiguating year suffix in author-date styles (e.g.&nbsp;\u201Ca\u201D in \u201CDoe,\n1999a\u201D).",
         "Manuscript configuration",
-        "internal-schema-hack"
+        "internal-schema-hack",
+        "If <code>none</code>, do not process raw HTML table in cell output\nand leave it as-is"
       ],
       "schema/external-schemas.yml": [
         {
@@ -21738,12 +22152,12 @@ var require_yaml_intelligence_resources = __commonJS({
         mermaid: "%%"
       },
       "handlers/mermaid/schema.yml": {
-        _internalId: 161289,
+        _internalId: 168429,
         type: "object",
         description: "be an object",
         properties: {
           "mermaid-format": {
-            _internalId: 161281,
+            _internalId: 168421,
             type: "enum",
             enum: [
               "png",
@@ -21759,7 +22173,7 @@ var require_yaml_intelligence_resources = __commonJS({
             exhaustiveCompletions: true
           },
           theme: {
-            _internalId: 161288,
+            _internalId: 168428,
             type: "anyOf",
             anyOf: [
               {
@@ -21799,7 +22213,77 @@ var require_yaml_intelligence_resources = __commonJS({
           "case-detection": true
         },
         $id: "handlers/mermaid"
-      }
+      },
+      "schema/document-lightbox.yml": [
+        {
+          name: "lightbox",
+          schema: {
+            anyOf: [
+              "boolean",
+              {
+                enum: [
+                  "auto"
+                ]
+              },
+              {
+                object: {
+                  closed: true,
+                  properties: {
+                    match: {
+                      schema: {
+                        enum: [
+                          "auto"
+                        ]
+                      },
+                      description: {
+                        short: "Set this to `auto` if you'd like any image to be given lightbox treatment.",
+                        long: "Set this to `auto` if you'd like any image to be given lightbox treatment. If you omit this, only images with the class `lightbox` will be given the lightbox treatment.\n"
+                      }
+                    },
+                    effect: {
+                      schema: {
+                        enum: [
+                          "fade",
+                          "zoom",
+                          "none"
+                        ]
+                      },
+                      description: "The effect that should be used when opening and closing the lightbox. One of `fade`, `zoom`, `none`. Defaults to `zoom`."
+                    },
+                    "desc-position": {
+                      schema: {
+                        enum: [
+                          "top",
+                          "bottom",
+                          "left",
+                          "right"
+                        ]
+                      },
+                      description: "The position of the title and description when displaying a lightbox. One of `top`, `bottom`, `left`, `right`. Defaults to `bottom`."
+                    },
+                    loop: {
+                      boolean: {
+                        description: "Whether galleries should 'loop' to first image in the gallery if the user continues past the last image of the gallery. Boolean that defaults to `true`."
+                      }
+                    },
+                    "css-class": {
+                      string: {
+                        description: "A class name to apply to the lightbox to allow css targeting. This will replace the lightbox class with your custom class name."
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          tags: {
+            formats: [
+              "$html-doc"
+            ]
+          },
+          description: "Enable or disable lightbox treatment for images in this document."
+        }
+      ]
     };
   }
 });
@@ -30995,10 +31479,10 @@ async function breakQuartoMd(src, validate2 = false, lenient = false) {
   };
   const yamlRegEx = /^---\s*$/;
   const startCodeCellRegEx = new RegExp(
-    "^\\s*```+\\s*\\{([=A-Za-z]+)( *[ ,].*)?\\}\\s*$"
+    "^\\s*(```+)\\s*\\{([=A-Za-z]+)( *[ ,].*)?\\}\\s*$"
   );
   const startCodeRegEx = /^```/;
-  const endCodeRegEx = /^\s*```+\s*$/;
+  const endCodeRegEx = /^\s*(```+)\s*$/;
   let language = "";
   let directiveParams = void 0;
   let cellStartLine = 0;
@@ -31108,11 +31592,12 @@ async function breakQuartoMd(src, validate2 = false, lenient = false) {
       await flushLineBuffer("directive", i);
     } else if (startCodeCellRegEx.test(line.substring) && inPlainText()) {
       const m = line.substring.match(startCodeCellRegEx);
-      language = m[1];
+      language = m[2];
       await flushLineBuffer("markdown", i);
       inCodeCell = true;
+      inCode = m[1].length;
       codeStartRange = line;
-    } else if (endCodeRegEx.test(line.substring) && (inCodeCell || inCode && tickCount(line.substring) === inCode)) {
+    } else if (endCodeRegEx.test(line.substring) && (inCode && line.substring.match(endCodeRegEx)[1].length === inCode)) {
       if (inCodeCell) {
         codeEndRange = line;
         inCodeCell = false;

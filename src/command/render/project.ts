@@ -68,6 +68,7 @@ import { asArray } from "../../core/array.ts";
 import { normalizePath } from "../../core/path.ts";
 import { isSubdir } from "fs/_util.ts";
 import { Format } from "../../config/types.ts";
+import { fileExecutionEngine } from "../../execute/engine.ts";
 
 export async function renderProject(
   context: ProjectContext,
@@ -299,6 +300,7 @@ export async function renderProject(
     };
   };
 
+  let moveOutputResult: Record<string, unknown> | undefined;
   if (outputDirAbsolute) {
     // track whether we need to keep the lib dir around
     let keepLibsDir = false;
@@ -419,6 +421,14 @@ export async function renderProject(
         }
       }
     });
+
+    // Before file move
+    if (projType.beforeMoveOutput) {
+      moveOutputResult = await projType.beforeMoveOutput(
+        context,
+        projResults.files,
+      );
+    }
 
     sortedOperations.forEach((op) => {
       op.performOperation();
@@ -581,8 +591,18 @@ export async function renderProject(
   // forward error to projResults
   projResults.error = fileResults.error;
 
-  // call project post-render
+  // call engine and project post-render
   if (!projResults.error) {
+    // engine post-render
+    for (const file of projResults.files) {
+      const path = join(context.dir, file.input);
+      const engine = fileExecutionEngine(path, options.flags);
+      if (engine?.postRender) {
+        await engine.postRender(file, projResults.context);
+      }
+    }
+
+    // compute output files
     const outputFiles = projResults.files
       .filter((x) => !x.isTransient)
       .map((result) => {
@@ -596,6 +616,7 @@ export async function renderProject(
           : join(projDir, result.file);
         return {
           file,
+          input: join(projDir, result.input),
           format: result.format,
           resources: result.resourceFiles,
           supporting: result.supporting,
@@ -607,6 +628,7 @@ export async function renderProject(
         context,
         incremental,
         outputFiles,
+        moveOutputResult,
       );
     }
 

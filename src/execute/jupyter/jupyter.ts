@@ -4,9 +4,12 @@
  * Copyright (C) 2020-2022 Posit Software, PBC
  */
 
-import { join } from "path/mod.ts";
+import { dirname, join, relative } from "path/mod.ts";
+import { satisfies } from "semver/mod.ts";
 
 import { existsSync } from "fs/mod.ts";
+
+import { error } from "log/mod.ts";
 
 import * as ld from "../../core/lodash.ts";
 
@@ -40,6 +43,7 @@ import {
   kKeepHidden,
   kKeepIpynb,
   kNotebookPreserveCells,
+  kRemoveHidden,
 } from "../../config/constants.ts";
 import { Format } from "../../config/types.ts";
 import {
@@ -64,7 +68,7 @@ import {
   includesForJupyterWidgetDependencies,
 } from "../../core/jupyter/widgets.ts";
 
-import { RenderOptions } from "../../command/render/types.ts";
+import { RenderOptions, RenderResultFile } from "../../command/render/types.ts";
 import {
   DependenciesOptions,
   ExecuteOptions,
@@ -75,6 +79,7 @@ import {
   kQmdExtensions,
   PandocIncludes,
   PostProcessOptions,
+  RunOptions,
 } from "../types.ts";
 import { postProcessRestorePreservedHtml } from "../engine-shared.ts";
 import { pythonExec } from "../../core/jupyter/exec.ts";
@@ -89,6 +94,20 @@ import { MappedString, mappedStringFromFile } from "../../core/mapped-text.ts";
 import { breakQuartoMd } from "../../core/lib/break-quarto-md.ts";
 import { ProjectContext } from "../../project/types.ts";
 import { isQmdFile } from "../qmd.ts";
+import {
+  isJupyterPercentScript,
+  kJupyterPercentScriptExtensions,
+  markdownFromJupyterPercentScript,
+} from "./percent.ts";
+import {
+  inputFilesDir,
+  isServerShiny,
+  isServerShinyPython,
+} from "../../core/render.ts";
+import { jupyterCapabilities } from "../../core/jupyter/capabilities.ts";
+import { runExternalPreviewServer } from "../../preview/preview-server.ts";
+import { onCleanup } from "../../core/cleanup.ts";
+import { basename } from "https://deno.land/std@0.185.0/path/win32.ts";
 
 export const jupyterEngine: ExecutionEngine = {
   name: kJupyterEngine,
@@ -117,10 +136,15 @@ export const jupyterEngine: ExecutionEngine = {
     }
   },
 
-  validExtensions: () => kJupyterNotebookExtensions.concat(kQmdExtensions),
+  validExtensions: () => [
+    ...kJupyterNotebookExtensions,
+    ...kJupyterPercentScriptExtensions,
+    ...kQmdExtensions,
+  ],
 
-  claimsExtension: (ext: string) => {
-    return kJupyterNotebookExtensions.includes(ext.toLowerCase());
+  claimsFile: (file: string, ext: string) => {
+    return kJupyterNotebookExtensions.includes(ext.toLowerCase()) ||
+      isJupyterPercentScript(file);
   },
 
   claimsLanguage: (_language: string) => {
@@ -136,11 +160,16 @@ export const jupyterEngine: ExecutionEngine = {
     // at some point we'll resolve a full notebook/kernelspec
     let nb: JupyterNotebook | undefined;
 
+    // cache check for percent script
+    const isPercentScript = isJupyterPercentScript(file);
+
     if (markdown === undefined) {
       if (isJupyterNotebook(file)) {
         const nbJSON = Deno.readTextFileSync(file);
         nb = JSON.parse(nbJSON) as JupyterNotebook;
         markdown = asMappedString(markdownFromNotebookJSON(nb));
+      } else if (isPercentScript) {
+        markdown = asMappedString(markdownFromJupyterPercentScript(file));
       } else {
         markdown = asMappedString(mappedStringFromFile(file));
       }
@@ -150,7 +179,7 @@ export const jupyterEngine: ExecutionEngine = {
     const metadata = readYamlFromMarkdown(markdown.value);
 
     // if this is a text markdown file then create a notebook for use as the execution target
-    if (isQmdFile(file)) {
+    if (isQmdFile(file) || isPercentScript) {
       // write a transient notebook
       const [fileDir, fileStem] = dirAndStem(file);
       const notebook = join(fileDir, fileStem + ".ipynb");
@@ -163,7 +192,6 @@ export const jupyterEngine: ExecutionEngine = {
       };
       nb = await createNotebookforTarget(target, project);
       target.data.kernelspec = nb.metadata.kernelspec;
-
       return target;
     } else if (isJupyterNotebook(file)) {
       return {
@@ -181,6 +209,8 @@ export const jupyterEngine: ExecutionEngine = {
   partitionedMarkdown: async (file: string, format?: Format) => {
     if (isJupyterNotebook(file)) {
       return partitionMarkdown(await markdownFromNotebookFile(file, format));
+    } else if (isJupyterPercentScript(file)) {
+      return partitionMarkdown(markdownFromJupyterPercentScript(file));
     } else {
       return partitionMarkdown(Deno.readTextFileSync(file));
     }
@@ -191,6 +221,17 @@ export const jupyterEngine: ExecutionEngine = {
     options: RenderOptions,
     format: Format,
   ) => {
+    // if this is shiny server and the user hasn't set keep-hidden then
+    // set it as well as the attibutes required to remove the hidden blocks
+    if (
+      isServerShinyPython(format, kJupyterEngine) &&
+      format.render[kKeepHidden] !== true
+    ) {
+      format = ld.cloneDeep(format);
+      format.render[kKeepHidden] = true;
+      format.metadata[kRemoveHidden] = "all";
+    }
+
     if (isJupyterNotebook(source)) {
       // see if we want to override execute enabled
       let executeEnabled: boolean | null | undefined;
@@ -234,7 +275,11 @@ export const jupyterEngine: ExecutionEngine = {
   execute: async (options: ExecuteOptions): Promise<ExecuteResult> => {
     // create the target input if we need to (could have been removed
     // by the cleanup step of another render in this invocation)
-    if (isQmdFile(options.target.source) && !existsSync(options.target.input)) {
+    if (
+      (isQmdFile(options.target.source) ||
+        isJupyterPercentScript(options.target.source)) &&
+      !existsSync(options.target.input)
+    ) {
       await createNotebookforTarget(options.target);
     }
 
@@ -361,6 +406,7 @@ export const jupyterEngine: ExecutionEngine = {
 
     // return results
     return {
+      engine: kJupyterEngine,
       markdown: markdown,
       supporting: [join(assets.base_dir, assets.supporting_dir)],
       filters: [],
@@ -394,6 +440,118 @@ export const jupyterEngine: ExecutionEngine = {
     });
   },
 
+  run: async (options: RunOptions): Promise<void> => {
+    // semver doesn't support 4th component
+    const asSemVer = (version: string) => {
+      const v = version.split(".");
+      if (v.length > 3) {
+        return `${v[0]}.${v[1]}.${v.slice(2).join("")}`;
+      } else {
+        return version;
+      }
+    };
+
+    // confirm required version of shiny
+    const kShinyVersion = ">=0.5.1.9002";
+    let shinyError: string | undefined;
+    const caps = await jupyterCapabilities();
+    if (!caps?.shiny) {
+      shinyError =
+        "The shiny package is required for documents with server: shiny";
+    } else if (!satisfies(asSemVer(caps.shiny), asSemVer(kShinyVersion))) {
+      shinyError =
+        `The shiny package version must be ${kShinyVersion} for documents with server: shiny`;
+    }
+    if (shinyError) {
+      shinyError +=
+        "\n\nInstall the development version of the shiny package with: \n\n" +
+        "pip install git+https://github.com/posit-dev/py-htmltools.git@html-text-doc#egg=htmltools\n" +
+        "pip install git+https://github.com/posit-dev/py-shiny.git@quarto-ext#egg=shiny\n";
+      error(shinyError);
+      throw new Error();
+    }
+
+    const [_dir, stem] = dirAndStem(options.input);
+    const appFile = `${stem}-app.py`;
+    const cmd = [
+      ...await pythonExec(),
+      "-m",
+      "shiny",
+      "run",
+      appFile,
+      "--host",
+      options.host!,
+      "--port",
+      String(options.port!),
+    ];
+    if (options.reload) {
+      cmd.push("--reload");
+      cmd.push(`--reload-includes`);
+      cmd.push(`*.py`);
+    }
+
+    // start server
+    const readyPattern = /(http:\/\/(?:localhost|127\.0\.0\.1)\:\d+\/?[^\s]*)/;
+    const server = runExternalPreviewServer({
+      cmd,
+      readyPattern,
+      cwd: dirname(options.input),
+    });
+    await server.start();
+
+    // stop the server onCleanup
+    onCleanup(async () => {
+      await server.stop();
+    });
+
+    // notify when ready
+    if (options.onReady) {
+      options.onReady();
+    }
+
+    // run the server
+    return server.serve();
+  },
+
+  postRender: async (file: RenderResultFile, _context?: ProjectContext) => {
+    // discover non _files dir resources for server: shiny and amend app.py with them
+    if (isServerShiny(file.format)) {
+      const [dir, stem] = dirAndStem(file.input);
+      const filesDir = join(dir, inputFilesDir(file.input));
+      const extraResources = file.resourceFiles
+        .filter((resource) => !resource.startsWith(filesDir))
+        .map((resource) => relative(dir, resource));
+      const appScript = join(dir, `${stem}-app.py`);
+      if (existsSync(appScript)) {
+        // compute static assets
+        const staticAssets = [inputFilesDir(file.input), ...extraResources];
+
+        // check for (illegal) parent dir assets
+        const parentDirAssets = staticAssets.filter((asset) =>
+          asset.startsWith("..")
+        );
+        if (parentDirAssets.length > 0) {
+          error(
+            `References to files in parent directories found in document with server: shiny ` +
+              `(${basename(file.input)}): ${
+                JSON.stringify(parentDirAssets)
+              }. All resource files referenced ` +
+              `by Shiny documents must exist in the same directory as the source file.`,
+          );
+          throw new Error();
+        }
+
+        // In the app.py file, replace the placeholder with the list of static assets.
+        let appContents = Deno.readTextFileSync(appScript);
+        appContents = appContents.replace(
+          "##STATIC_ASSETS_PLACEHOLDER##",
+          JSON.stringify(staticAssets),
+        );
+        Deno.writeTextFileSync(appScript, appContents);
+      }
+    }
+  },
+
   postprocess: (options: PostProcessOptions) => {
     postProcessRestorePreservedHtml(options);
     return Promise.resolve();
@@ -411,14 +569,16 @@ export const jupyterEngine: ExecutionEngine = {
     return !isJupyterNotebook(target.source);
   },
 
-  keepFiles: (input: string) => {
+  intermediateFiles: (input: string) => {
     const files: string[] = [];
     const [fileDir, fileStem] = dirAndStem(input);
 
-    if (!isJupyterNotebook(input) && !input.endsWith(`.${kJupyterEngine}.md`)) {
+    if (!isJupyterNotebook(input)) {
       files.push(join(fileDir, fileStem + ".ipynb"));
     } else if (
-      isJupyterNotebook(input) && existsSync(join(fileDir, fileStem + ".qmd"))
+      [...kQmdExtensions, ...kJupyterPercentScriptExtensions].some((ext) => {
+        return existsSync(join(fileDir, fileStem + ext));
+      })
     ) {
       files.push(input);
     }

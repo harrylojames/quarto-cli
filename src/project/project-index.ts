@@ -4,8 +4,7 @@
  * Copyright (C) 2020-2022 Posit Software, PBC
  */
 
-import { basename, dirname, isAbsolute, join, relative } from "path/mod.ts";
-import { existsSync } from "fs/mod.ts";
+import { dirname, isAbsolute, join, relative } from "path/mod.ts";
 
 import * as ld from "../core/lodash.ts";
 
@@ -19,6 +18,7 @@ import {
   normalizePath,
   pathWithForwardSlashes,
   removeIfExists,
+  safeExistsSync,
 } from "../core/path.ts";
 import { kTitle } from "../config/constants.ts";
 import { fileExecutionEngine } from "../execute/engine.ts";
@@ -50,7 +50,7 @@ export async function inputTargetIndex(
   const inputFile = join(project.dir, input);
 
   // return undefined if the file doesn't exist
-  if (!existsSync(inputFile) || Deno.statSync(inputFile).isDirectory) {
+  if (!safeExistsSync(inputFile) || Deno.statSync(inputFile).isDirectory) {
     return Promise.resolve(undefined);
   }
 

@@ -91,12 +91,12 @@ IF DEFINED QUARTO_DENO_DOM (
 )
 
 IF NOT DEFINED QUARTO_DENO (
-    set "QUARTO_DENO=!SCRIPT_PATH!\tools\deno.exe"
+    set "QUARTO_DENO=!SCRIPT_PATH!\tools\x86_64\deno.exe"
 )
 
 SET "DENO_TLS_CA_STORE=system,mozilla"
 SET "DENO_NO_UPDATE_CHECK=1"
-SET "QUARTO_DENO_OPTIONS=--unstable --no-config --cached-only --allow-read --allow-write --allow-run --allow-env --allow-net --allow-ffi !QUARTO_DENO_OPTIONS!"
+SET "QUARTO_DENO_OPTIONS=--unstable --no-config --cached-only --allow-read --allow-write --allow-run --allow-env --allow-net --allow-ffi"
 
 !QUARTO_DENO! !QUARTO_ACTION! !QUARTO_DENO_OPTIONS! !QUARTO_DENO_EXTRA_OPTIONS! !QUARTO_IMPORT_ARGMAP! !QUARTO_TARGET! %*
 

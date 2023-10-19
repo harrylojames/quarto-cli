@@ -19,6 +19,7 @@ import {
 } from "../../core/jupyter/jupyter-shared.ts";
 import { completeMessage, withSpinner } from "../../core/console.ts";
 import {
+  checkRBinary,
   KnitrCapabilities,
   knitrCapabilities,
   knitrCapabilitiesMessage,
@@ -34,6 +35,10 @@ import { pandocBinaryPath } from "../../core/resources.ts";
 import { lines } from "../../core/text.ts";
 import { satisfies } from "semver/mod.ts";
 import { dartCommand } from "../../core/dart-sass.ts";
+import { allTools } from "../../tools/tools.ts";
+import { texLiveContext, tlVersion } from "../render/latexmk/texlive.ts";
+import { which } from "../../core/path.ts";
+import { dirname } from "path/mod.ts";
 
 const kIndent = "      ";
 
@@ -42,7 +47,7 @@ export type Target = "install" | "jupyter" | "knitr" | "versions" | "all";
 export async function check(target: Target): Promise<void> {
   const services = renderServices();
   try {
-    info("");
+    info(`Quarto ${quartoConfig.version()}`);
     if (target === "versions" || target === "all") {
       await checkVersions(services);
     }
@@ -132,7 +137,58 @@ async function checkInstall(services: RenderServices) {
       info(`      CodePage: Unable to read code page`);
     }
   }
+
   info("");
+  const toolsMessage = "Checking tools....................";
+  const toolsOutput: string[] = [];
+  await withSpinner({
+    message: toolsMessage,
+    doneMessage: toolsMessage + "OK",
+  }, async () => {
+    const tools = await allTools();
+
+    for (const tool of tools.installed) {
+      const version = await tool.installedVersion() || "(external install)";
+      toolsOutput.push(`      ${tool.name}: ${version}`);
+    }
+    for (const tool of tools.notInstalled) {
+      toolsOutput.push(`      ${tool.name}: (not installed)`);
+    }
+  });
+  toolsOutput.forEach((out) => info(out));
+  info("");
+
+  const latexMessage = "Checking LaTeX....................";
+  const latexOutput: string[] = [];
+  await withSpinner({
+    message: latexMessage,
+    doneMessage: latexMessage + "OK",
+  }, async () => {
+    const tlContext = await texLiveContext(true);
+    if (tlContext.hasTexLive) {
+      const version = await tlVersion(tlContext);
+
+      if (tlContext.usingGlobal) {
+        const tlMgrPath = await which("tlmgr");
+
+        latexOutput.push(`      Using: Installation From Path`);
+        if (tlMgrPath) {
+          latexOutput.push(`      Path: ${dirname(tlMgrPath)}`);
+        }
+      } else {
+        latexOutput.push(`      Using: TinyTex`);
+        if (tlContext.binDir) {
+          latexOutput.push(`      Path: ${tlContext.binDir}`);
+        }
+      }
+      latexOutput.push(`      Version: ${version}`);
+    } else {
+      latexOutput.push(`      Tex:  (not detected)`);
+    }
+  });
+  latexOutput.forEach((out) => info(out));
+  info("");
+
   const kMessage = "Checking basic markdown render....";
   await withSpinner({
     message: kMessage,
@@ -231,13 +287,15 @@ title: "Title"
 async function checkKnitrInstallation(services: RenderServices) {
   const kMessage = "Checking R installation...........";
   let caps: KnitrCapabilities | undefined;
+  let rBin: string | undefined;
   await withSpinner({
     message: kMessage,
     doneMessage: false,
   }, async () => {
-    caps = await knitrCapabilities();
+    rBin = await checkRBinary();
+    caps = await knitrCapabilities(rBin);
   });
-  if (caps) {
+  if (rBin && caps) {
     completeMessage(kMessage + "OK");
     info(knitrCapabilitiesMessage(caps, kIndent));
     info("");
@@ -261,9 +319,17 @@ async function checkKnitrInstallation(services: RenderServices) {
       );
       info("");
     }
-  } else {
+  } else if (rBin === undefined) {
     completeMessage(kMessage + "(None)\n");
     info(rInstallationMessage(kIndent));
+    info("");
+  } else if (caps === undefined) {
+    completeMessage(kMessage + "(None)\n");
+    info(`R succesfully found at ${rBin}.`);
+    info(
+      "However, a problem was encountered when checking configurations of packages.",
+    );
+    info("Please check your installation of R.");
     info("");
   }
 }

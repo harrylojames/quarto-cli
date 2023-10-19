@@ -66,7 +66,7 @@ import { error, info } from "log/mod.ts";
 import * as ld from "../../core/lodash.ts";
 import { basename, dirname, join, relative } from "path/mod.ts";
 import { Format } from "../../config/types.ts";
-import { figuresDir, inputFilesDir } from "../../core/render.ts";
+import { figuresDir, inputFilesDir, isServerShiny } from "../../core/render.ts";
 import {
   normalizePath,
   removeIfEmptyDir,
@@ -103,6 +103,10 @@ import {
 import { satisfies } from "semver/mod.ts";
 import { quartoConfig } from "../../core/quarto.ts";
 import { ensureNotebookContext } from "../../core/jupyter/jupyter-embed.ts";
+import {
+  projectIsWebsite,
+  projectOutputDir,
+} from "../../project/project-shared.ts";
 
 export async function renderExecute(
   context: RenderContext,
@@ -481,6 +485,26 @@ async function renderFileInternal(
     pushTiming("render-context");
     const context = ld.cloneDeep(contexts[format]) as RenderContext; // since we're going to mutate it...
 
+    // disquality some documents from server: shiny
+    if (isServerShiny(context.format) && context.project) {
+      const src = relative(context.project?.dir!, context.target.source);
+      if (projectIsWebsite(context.project)) {
+        error(
+          `${src} uses server: shiny so cannot be included in a website project ` +
+            `(shiny documents require a backend server and so can't be published as static web content).`,
+        );
+        throw new Error();
+      } else if (
+        projectOutputDir(context.project) !== normalizePath(context.project.dir)
+      ) {
+        error(
+          `${src} uses server: shiny so cannot be included in a project with an output-dir ` +
+            `(shiny document output must be rendered alongside its source document).`,
+        );
+        throw new Error();
+      }
+    }
+
     // get output recipe
     const recipe = outputRecipe(context);
     outputs.push({
@@ -607,7 +631,7 @@ async function renderFileInternal(
           resourceFiles.push(...ojsResourceFiles);
 
           // keep md if requested
-          const keepMd = executionEngineKeepMd(context.target.input);
+          const keepMd = executionEngineKeepMd(context);
           if (keepMd && context.format.execute[kKeepMd]) {
             Deno.writeTextFileSync(keepMd, executeResult.markdown.value);
           }

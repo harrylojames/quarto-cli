@@ -20,13 +20,18 @@ execute <- function(input, format, tempDir, libDir, dependencies, cwd, params, r
   # rmd input filename
   rmd_input <- paste0(xfun::sans_ext(input), ".rmarkdown")
       
-  # swap out the input
-  write(markdown, rmd_input)
+  # swap out the input by reading then writing content.
+  # This handles `\r\n` EOL on windows in `markdown` string
+  # by spliting in lines
+  xfun::write_utf8(
+    xfun::read_utf8(textConnection(markdown, encoding = "UTF-8")),
+    rmd_input
+  )
   input <- rmd_input
       
   # remove the rmd input on exit
   rmd_input_path <- rmarkdown:::abs_path(rmd_input)
-  on.exit(unlink(rmd_input_path))
+  on.exit(unlink(rmd_input_path), add = TRUE)
 
   # give the input an .Rmd extension if it doesn't already have one
   # (this is a temporary copy which we'll remove before exiting). note
@@ -127,12 +132,17 @@ execute <- function(input, format, tempDir, libDir, dependencies, cwd, params, r
   needs_ojs <- grepl("(\n|^)[[:space:]]*```+\\{ojs[^}]*\\}", markdown)
   # FIXME this test isn't failing in shiny mode, but it doesn't look to be
   # breaking quarto-shiny-ojs. We should make sure this is right.
-  if (!is_shiny_prerendered(knitr::opts_knit$get("rmarkdown.runtime")) &&
-      needs_ojs) {
-    attach(list(
-      quarto_format = format
-    ), name = "tools:quarto")
-    source(file.path(resourceDir, "rmd", "ojs_static.R"))
+  if (
+    !is_shiny_prerendered(knitr::opts_knit$get("rmarkdown.runtime")) &&
+      needs_ojs
+  ) {
+    local({
+      # create a hidden environment to store specific objects
+      .quarto_tools_env <- attach(NULL, name = "tools:quarto")
+      # source ojs_define() function and save it in the tools environment
+      source(file.path(resourceDir, "rmd", "ojs_static.R"), local = TRUE)
+      assign("ojs_define", ojs_define, envir = .quarto_tools_env)
+    })
   }
 
   env <- globalenv()
@@ -205,6 +215,7 @@ execute <- function(input, format, tempDir, libDir, dependencies, cwd, params, r
 
   # results
   list(
+    engine = "knitr",
     markdown = paste(markdown, collapse="\n"),
     supporting = I(supporting),
     filters = I("rmarkdown/pagebreak.lua"),
@@ -254,6 +265,7 @@ knitr_options <- function(format, resourceDir, handledLanguages) {
     # options derived from format
     fig.width = format$execute$`fig-width`,
     fig.height = format$execute$`fig-height`,
+    fig.asp = format$execute$`fig-asp`,
     dev = format$execute$`fig-format`,
     dpi = format$execute$`fig-dpi`,
     eval = format$execute[["eval"]],
@@ -406,48 +418,48 @@ dependencies_from_render <- function(input, files_dir, knit_meta, format) {
     }
   }
 
-  # get extras (e.g. html dependencies)
-  # only include these html extras if we're targeting a format that
-  # supports html (widgets) like this or that prefers html (e.g. Hugo)
+  # convert dependencies to in_header includes
+  dependencies$includes <- list()
+
   if (is_pandoc_html_format(format) || format$render$`prefer-html`) {
+    # get extras (e.g. html dependencies)
+    # only include these html extras if we're targeting a format that
+    # supports html (widgets) like this or that prefers html (e.g. Hugo)
     extras <- rmarkdown:::html_extras_for_document(
       knit_meta,
       runtime,
       resolver,
       list() # format deps
     )
-  } else {
-    extras = {}
-  }
 
-  # filter out bootstrap
-  extras$dependencies <- Filter(
-    function(dependency) {dependency$name != "bootstrap"},
-    extras$dependencies
-  )
+    # filter out bootstrap
+    extras$dependencies <- Filter(
+      function(dependency) dependency$name != "bootstrap",
+      extras$dependencies
+    )
 
-  # convert dependencies to in_header includes
-  dependencies$includes <- list()
-  if (length(extras$dependencies) > 0) {
-    deps <- html_dependencies_as_string(extras$dependencies, files_dir)
-    dependencies$includes$in_header <- deps
-  }
-  
-  # handle latex dependencies
-  if (rmarkdown:::has_latex_dependencies(knit_meta)) {
+
+    if (length(extras$dependencies) > 0) {
+      deps <- html_dependencies_as_string(extras$dependencies, files_dir)
+      dependencies$includes$in_header <- deps
+    }
+
+    # extract static ojs definitions for HTML only (not prefer-html)
+    if (is_pandoc_html_format(format)) {
+      ojs_defines <- rmarkdown:::flatten_dependencies(
+        knit_meta, function(dep) inherits(dep, "ojs-define")
+      )
+      ojs_define_str <- knitr:::one_string(unlist(ojs_defines))
+      if (ojs_define_str != "") {
+        dependencies$includes$in_header <- knitr:::one_string(c(dependencies$includes$in_header, ojs_define_str))
+      }
+    }
+  } else if (
+    is_latex_output(format$pandoc$to) &&
+    rmarkdown:::has_latex_dependencies(knit_meta)
+  ) {
     latex_dependencies <- rmarkdown:::flatten_latex_dependencies(knit_meta)
     dependencies$includes$in_header <- rmarkdown:::latex_dependencies_as_string(latex_dependencies)
-  }
-
-  # extract static ojs definitions
-  ojs_defines <- rmarkdown:::flatten_dependencies(
-    knit_meta,
-    function(dep) {
-      inherits(dep, "ojs-define")
-    })
-  ojs_define_str <- paste(unlist(ojs_defines), collapse='\n')
-  if (ojs_define_str != "") {
-    dependencies$includes$in_header <- paste(c(dependencies$includes$in_header, ojs_define_str), collapse='\n')
   }
 
   # return dependencies
@@ -519,6 +531,10 @@ extract_preserve_chunks <- function(output_file, format) {
 
 is_pandoc_html_format <- function(format) {
   knitr::is_html_output(format$pandoc$to, c("markdown", "epub", "gfm", "commonmark", "commonmark_x", "markua"))
+}
+
+is_latex_output <- function(to) {
+  knitr:::is_latex_output() || identical(to, "pdf")
 }
 
 # apply patches to output as required

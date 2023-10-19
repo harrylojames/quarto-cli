@@ -265,11 +265,17 @@ local function as_inlines(v)
   end
 
   if type(v) == "table" then
-    return pandoc.utils.blocks_to_inlines(v)
+    local result = pandoc.Inlines({})
+    for i, v in ipairs(v) do
+      tappend(result, as_inlines(v))
+    end
+    return result
   end
 
+  -- luacov: disable
   fatal("as_inlines: invalid type " .. t)
-  return nil
+  return pandoc.Inlines({})
+  -- luacov: enable
 end
 
 local function as_blocks(v)
@@ -291,8 +297,112 @@ local function as_blocks(v)
     return pandoc.Blocks(v)
   end
 
+  -- luacov: disable
   fatal("as_blocks: invalid type " .. t)
   return nil
+  -- luacov: enable
+end
+
+local function match_fun(...)
+  local args = {...}
+  return function(v)
+    for _, f in ipairs(args) do
+      local r = f(v)
+      if r == false or r == nil then
+        return r
+      end
+      if r ~= true then
+        v = r
+      end
+    end
+    return v
+  end
+end
+
+local function match(...)
+  local result = {}
+  local captured = false
+  local captures = {}
+  local capture_id = function(v) return v end
+  local capture_add = function(v) 
+    table.insert(captures, v) 
+    return v 
+  end
+
+  local function process_number(n, capture_fun)
+    table.insert(result, function(node)
+      return node.content ~= nil and 
+        node.content[n] and 
+        capture_fun(node.content[n])
+    end)
+  end
+
+  local function process_str(str)
+    local vs = split(str, "/", true)
+    for _, v in ipairs(vs) do
+      local first = v:sub(1, 1)
+      local last = v:sub(-1)
+      local capture_fun = capture_id
+      if first == "{" then -- capture
+        v = v:sub(2, -2)
+        if last ~= "}" then
+          fail("invalid match token: " .. v .. "(in " .. str .. ")")
+          return match_fun({})
+        end
+        first = v:sub(1, 1)
+        capture_fun = capture_add
+        captured = true
+      end
+      -- close over capture_fun in all cases
+      if v == "" then
+        -- empty case exists to support {} as a valid parameter,
+        -- which is useful to capture the result of the previous match when it's a function
+        table.insert(result, (function(capture_fun) 
+          return function(node) 
+            return capture_fun(node) 
+          end
+        end)(capture_fun))
+
+      elseif first == "[" then -- [1]
+        local n = tonumber(v:sub(2, -2))
+        process_number(n, capture_fun)
+      elseif first:upper() == first then -- Plain
+        table.insert(result, (function(capture_fun, v)
+          return function(node) 
+            return (is_regular_node(node, v) or is_custom_node(node, v)) and capture_fun(node) 
+          end
+        end)(capture_fun, v))
+      else
+        fail("invalid match token: " .. v .. "(in " .. str .. ")")
+        return match_fun({})
+      end
+    end
+  end
+
+  local args = {...}
+  for _, v in ipairs(args) do
+    if type(v) == "string" then
+      process_str(v)
+    elseif type(v) == "number" then
+      process_number(v, capture_id)
+    elseif type(v) == "function" then
+      table.insert(result, v)
+    else
+      fail("invalid match parameter: " .. tostring(v))
+      return match_fun({})
+    end
+  end
+
+  if captured then
+    local function send_capture(v)
+      if v then 
+        return captures
+      end
+      return v
+    end
+    table.insert(result, send_capture)
+  end
+  return match_fun(table.unpack(result))
 end
 
 return {
@@ -304,5 +414,22 @@ return {
   },
   as_inlines = as_inlines,
   as_blocks = as_blocks,
+  match = match,
+  add_to_blocks = function(blocks, block)
+    if pandoc.utils.type(blocks) ~= "Blocks" then
+      fatal("add_to_blocks: invalid type " .. pandoc.utils.type(blocks))
+    end
+    if block == nil then
+      return
+    end
+    local t = pandoc.utils.type(block)
+    if t == "Blocks" or t == "Inlines" then
+      blocks:extend(block)
+    elseif t == "Block" then
+      table.insert(blocks, block)
+    else
+      fatal("add_to_blocks: invalid type " .. t)
+    end
+  end,
 }
 

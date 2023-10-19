@@ -17,35 +17,41 @@ import {
   kHtmlPostprocessors,
   Metadata,
   NotebookPreviewDescriptor,
-  OtherLink,
   PandocFlags,
 } from "../../../config/types.ts";
 import { ProjectConfig, ProjectContext } from "../../types.ts";
 import {
   kArticleNotebookLabel,
+  kBibliography,
   kClearHiddenClasses,
+  kCodeLinks,
+  kDocumentClass,
   kEcho,
   kExtensionName,
   kFormatLinks,
+  kFormatResources,
   kIpynbProduceSourceNotebook,
   kKeepHidden,
+  kKeepTex,
   kLanguageDefaults,
+  kLightbox,
   kManuscriptMecaBundle,
   kNotebookLinks,
   kNotebookPreserveCells,
   kNotebookPreviewOptions,
   kNotebooks,
-  kOtherLinks,
   kOutputFile,
   kQuartoInternal,
   kRemoveHidden,
   kResources,
+  kTheme,
   kToc,
+  kTocLocation,
   kUnrollMarkdownCells,
   kWarning,
 } from "../../../config/constants.ts";
 import { projectOutputDir } from "../../project-shared.ts";
-import { isHtmlOutput } from "../../../config/format.ts";
+import { isHtmlOutput, isLatexOutput } from "../../../config/format.ts";
 import {
   PandocInputTraits,
   PandocOptions,
@@ -64,6 +70,7 @@ import {
   kManuscriptType,
   kManuscriptUrl,
   ManuscriptConfig,
+  ManuscriptOutputBundle,
   ResolvedManuscriptConfig,
 } from "./manuscript-types.ts";
 import {
@@ -72,7 +79,6 @@ import {
   shouldMakeMecaBundle,
 } from "./manuscript-meca.ts";
 import { readLines } from "io/mod.ts";
-import { isOutputFile } from "../../../command/render/output.ts";
 import {
   computeProjectArticleFile,
   isArticle,
@@ -95,9 +101,22 @@ import { resolveProjectInputLinks } from "../project-utilities.ts";
 import { isQmdFile } from "../../../execute/qmd.ts";
 
 import * as ld from "../../../core/lodash.ts";
+import {
+  binderUrl,
+  codeSpacesUrl,
+  hasBinderCompatibleEnvironment,
+  hasDevContainer,
+} from "../../../core/container.ts";
+import { computeProjectEnvironment } from "../../project-environment.ts";
+import { safeExistsSync } from "../../../core/path.ts";
+
+import { dirname, isAbsolute } from "path/mod.ts";
+import { copySync, ensureDirSync, existsSync } from "fs/mod.ts";
+import { kTitleBlockStyle } from "../../../format/html/format-html-title.ts";
 
 const kMecaIcon = "archive";
 const kOutputDir = "_manuscript";
+const kTexOutputBundle = "tex-bundle";
 
 // Manscript projects are a multi file project that is composed into:
 // - a root article file
@@ -172,7 +191,16 @@ export const manuscriptProjectType: ProjectType = {
         }
 
         // Filter output notebooks
-        if (isOutputFile(file, "ipynb")) {
+        const excludeSuffixes = [".out.ipynb", ".embed.ipynb"];
+        if (
+          excludeSuffixes.some((suffix) => {
+            return file.endsWith(suffix);
+          })
+        ) {
+          return false;
+        }
+
+        if (file.match(/\.embed\./)) {
           return false;
         }
         return true;
@@ -265,6 +293,15 @@ export const manuscriptProjectType: ProjectType = {
     // By default, notebook previews enable the back button
     const previewOptions = { back: true };
     config[kNotebookPreviewOptions] = previewOptions;
+
+    // Default to cosmo theme
+    config[kTheme] = "cosmo";
+
+    // Default to manuscript title block style
+    config[kTitleBlockStyle] = "manuscript";
+
+    // Default to lightbox auto
+    config[kLightbox] = "auto";
 
     return config;
   },
@@ -395,6 +432,10 @@ export const manuscriptProjectType: ProjectType = {
             // Target index.html as its output
             format.pandoc[kOutputFile] = "index.html";
           }
+
+          if (format.metadata[kTocLocation] === undefined) {
+            format.metadata[kTocLocation] = "left";
+          }
         }
       }
 
@@ -474,20 +515,9 @@ export const manuscriptProjectType: ProjectType = {
       context,
       manuscriptConfig,
     );
-    if (isArticle) {
-      // Add the github repo as a metadata link
-      const ghContext = await gitHubContext(context.dir);
-      if (ghContext) {
-        const repoUrl = ghContext.repoUrl;
-        if (repoUrl) {
-          const repoLink: OtherLink = {
-            icon: "github",
-            text: "GitHub Repo",
-            href: repoUrl,
-          };
-          extras.metadata[kOtherLinks] = [repoLink];
-        }
-      }
+    if (isArticle && isHtmlOutput(format.pandoc)) {
+      // Forward code links
+      extras.metadata[kCodeLinks] = manuscriptConfig[kCodeLinks];
 
       // If the user isn't explicitly providing a notebook list
       // then automatically create notebooks for the other items in
@@ -514,6 +544,11 @@ export const manuscriptProjectType: ProjectType = {
         };
       }
       extras[kNotebooks] = Object.values(outputNbs);
+    } else if (isArticle && isLatexOutput(format.pandoc)) {
+      if (isLatexOutput(format.pandoc)) {
+        // By default, keep tex and clean things up ourselves
+        format.render[kKeepTex] = true;
+      }
     }
 
     // Resolve input links
@@ -584,10 +619,28 @@ export const manuscriptProjectType: ProjectType = {
       return undefined;
     }
   },
+  beforeMoveOutput: async (
+    context: ProjectContext,
+    renderedFiles: RenderResultFile[],
+  ) => {
+    let outBundle;
+    for (const renderedFile of renderedFiles) {
+      const format = renderedFile.format;
+      if (isLatexOutput(format.pandoc) && format.render[kKeepTex]) {
+        outBundle = createTexOutputBundle(renderedFile, context);
+      }
+    }
+    if (outBundle) {
+      return {
+        [kTexOutputBundle]: outBundle,
+      };
+    }
+  },
   postRender: async (
     context: ProjectContext,
     _incremental: boolean,
     outputFiles: ProjectOutputFile[],
+    moveOutputResult?: Record<string, unknown>,
   ) => {
     const manuscriptConfig = context.config
       ?.[kManuscriptType] as ResolvedManuscriptConfig;
@@ -597,6 +650,12 @@ export const manuscriptProjectType: ProjectType = {
         manuscriptConfig,
       ) && outputFiles.length > 0
     ) {
+      let outBundle: ManuscriptOutputBundle | undefined;
+      if (moveOutputResult) {
+        outBundle =
+          moveOutputResult[kTexOutputBundle] as ManuscriptOutputBundle;
+      }
+
       const language = outputFiles[0].format.language;
 
       logProgress(`Creating ${language[kManuscriptMecaBundle]}`);
@@ -607,10 +666,11 @@ export const manuscriptProjectType: ProjectType = {
         projectOutputDir(context),
         outputFiles,
         manuscriptConfig,
+        outBundle,
       );
       if (mecaBundle) {
         const target = projectOutputDir(context);
-        Deno.renameSync(
+        Deno.copyFileSync(
           mecaBundle,
           join(target, mecaFileName),
         );
@@ -659,4 +719,111 @@ const resolveNotebookDescriptors = (
     resolvedNbs.push(resolveNotebookDescriptor(nb));
   }
   return resolvedNbs;
+};
+
+const kTexOutDir = "_tex";
+const createTexOutputBundle = (
+  outputFile: RenderResultFile,
+  context: ProjectContext,
+): ManuscriptOutputBundle | undefined => {
+  const format = outputFile.format;
+  const outDir = projectOutputDir(context);
+
+  // Find a unique output directory
+  const texDirAbs = join(outDir, `${kTexOutDir}`);
+  ensureDirSync(texDirAbs);
+
+  if (format.pandoc["output-file"]) {
+    // Compute the tex file path
+    const baseDir = join(context.dir, dirname(outputFile.input));
+    const texInputFile = join(baseDir, format.pandoc["output-file"]);
+    const texInputDir = dirname(texInputFile);
+
+    const texOutputFile = join(texDirAbs, format.pandoc["output-file"]);
+    const textOutputDir = dirname(texOutputFile);
+
+    // move the root output file
+    Deno.copyFileSync(
+      texInputFile,
+      texOutputFile,
+    );
+    Deno.removeSync(texInputFile);
+
+    // Create the resulting bundle descriptor
+    const texBundle: { manuscript: string; supporting: string[] } = {
+      manuscript: texOutputFile,
+      supporting: [],
+    };
+
+    // move the supporting files and resources
+    if (outputFile.supporting) {
+      const uniqSupporting = ld.uniq(outputFile.supporting);
+      for (const file of uniqSupporting) {
+        const supportingAbs = isAbsolute(file) ? file : join(texInputDir, file);
+        const outPath = join(texDirAbs, relative(context.dir, supportingAbs));
+        ensureDirSync(dirname(outPath));
+        copySync(supportingAbs, outPath, { overwrite: true });
+        Deno.removeSync(supportingAbs, { recursive: true });
+        texBundle.supporting.push(outPath);
+      }
+    }
+
+    // move the supporting files and resources
+    if (outputFile.resourceFiles) {
+      const uniqResources = ld.uniq(outputFile.resourceFiles);
+      for (const file of uniqResources) {
+        const outPath = join(texDirAbs, relative(context.dir, file));
+        ensureDirSync(dirname(outPath));
+        copySync(file, outPath, { overwrite: true });
+        texBundle.supporting.push(outPath);
+      }
+    }
+
+    // Deal with document class
+    const docClass = format.metadata[kDocumentClass];
+    const classFile = `${docClass}.cls`;
+    const classFilePath = join(texInputDir, classFile);
+    if (existsSync(classFilePath)) {
+      const outClassPath = join(textOutputDir, classFile);
+      copySync(classFilePath, outClassPath, { overwrite: true });
+      texBundle.supporting.push(outClassPath);
+    }
+
+    // Deal with bibliographies
+    if (format.metadata[kBibliography]) {
+      const bibliographies = Array.isArray(format.metadata[kBibliography])
+        ? format.metadata[kBibliography] as string[]
+        : [format.metadata[kBibliography] as string];
+      for (const bibligography of bibliographies) {
+        const bibPath = join(context.dir, bibligography);
+        const bibOutPath = join(textOutputDir, bibligography);
+        ensureDirSync(dirname(bibOutPath));
+        copySync(bibPath, bibOutPath, { overwrite: true });
+        texBundle.supporting.push(bibOutPath);
+      }
+    }
+
+    // Deal with format resources
+    const formatResources = format.render[kFormatResources];
+    if (formatResources) {
+      for (const formatResource of formatResources) {
+        const resourcePath = join(context.dir, formatResource);
+        const resourceOutPath = join(
+          textOutputDir,
+          basename(formatResource),
+        );
+        // Format resources could have been discovered some other way (e.g. document class)
+        // So don't error if they're already in place
+        if (!safeExistsSync(resourceOutPath)) {
+          copySync(resourcePath, resourceOutPath, { overwrite: true });
+          texBundle.supporting.push(resourceOutPath);
+        }
+      }
+    }
+    return texBundle;
+  } else {
+    throw new InternalError(
+      "Was expecting there to a Pandoc output file since we're rendering LaTeX",
+    );
+  }
 };

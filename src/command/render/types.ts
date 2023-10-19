@@ -6,7 +6,12 @@
 
 import { Document } from "../../core/deno-dom.ts";
 
-import { Format, PandocFlags, QuartoFilter } from "../../config/types.ts";
+import {
+  Format,
+  PandocFlags,
+  QuartoFilter,
+  QuartoFilterEntryPoint,
+} from "../../config/types.ts";
 import {
   ExecuteResult,
   ExecutionEngine,
@@ -205,6 +210,9 @@ export interface PandocOptions {
   // extra metadata to merge
   metadata?: Metadata;
 
+  // optional execution engine
+  executionEngine?: string;
+
   // optoinal project context
   project?: ProjectContext;
 
@@ -267,6 +275,8 @@ export type QuartoFilterSpec = {
 
   beforeQuartoFilters: QuartoFilter[];
   afterQuartoFilters: QuartoFilter[];
+
+  entryPoints: QuartoFilterEntryPoint[];
 };
 
 export interface PandocRenderCompletion {

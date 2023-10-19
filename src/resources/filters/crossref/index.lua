@@ -66,6 +66,8 @@ end
 function indexAddEntry(label, parent, order, caption, appendix)
   if caption ~= nil then
     caption = pandoc.List(caption)
+  else
+    caption = pandoc.List({})
   end
   crossref.index.entries[label] = {
     parent = parent,
@@ -104,6 +106,18 @@ function writeIndex()
   }
 end
 
+local function index_caption(v)
+  if #v.caption > 0 then
+    if pandoc.utils.type(v.caption[1]) == "Inline" then
+      return inlinesToString(pandoc.Inlines({v.caption[1]}))
+    else
+      return inlinesToString(pandoc.Inlines(v.caption[1].content))
+    end
+  else
+    return ""
+  end
+end
+
 function writeKeysIndex(indexFile)
   local index = {
     entries = pandoc.List(),
@@ -112,13 +126,8 @@ function writeKeysIndex(indexFile)
     -- create entry 
     local entry = {
       key = k,
+      caption = index_caption(v)
     }
-    -- add caption if we have one
-    if v.caption ~= nil then
-      entry.caption = inlinesToString(v.caption)
-    else
-      entry.caption = ""
-    end
     -- add entry
     index.entries:insert(entry)
   end
@@ -188,14 +197,9 @@ function writeFullIndex(indexFile)
       parent = v.parent,
       order = {
         number = v.order.order,
-      }
+      },
+      caption = index_caption(v)
     }
-    -- add caption if we have one
-    if v.caption ~= nil then
-      entry.caption = inlinesToString(v.caption)
-    else
-      entry.caption = ""
-    end
     -- add section if we have one
     if v.order.section ~= nil then
       entry.order.section = v.order.section
